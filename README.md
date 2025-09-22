@@ -5,8 +5,6 @@ Hi there fellow competition shooter!
 This is an AI-prompt generated application that scrapes the IPSC scoring site [shootnscoreit.com](https://shootnscoreit.com) for your match results and then generates overlay images that can be used when editing your match footage.<br/>
 No more, no less.
 
-As mentioned, the software scrapes your personal result page for a match and temporarily stores them in the application. Your persoanl result page does however not include the Rounds to be scored on that stage so if you want those included in the overlay you have the option to edit the scraped results before generating the overlay images. The edit function can also be handy if the scraped results are incorrect.
-
 
 ## Screenshots
 Main window
@@ -19,14 +17,15 @@ Do note the padding added on the overlay image. The added 400 pixels of transpar
 
 ## Why?
 This application was heavily inspired by the user Andreas_IPSC on youtube where he mentioned he created an application by himself that does the exact same thing. At the time of creating this he mentions in one of his videos that he has no current intention to release his application to the wild. So I thought I'd fire up a AI-code generator and have a go at it myself.<br/>
-Why? Because I'm a fellow competition shooter too and editing in scores without a tool like this makes the editing process an even bigger pain in the ass than it already is and I've even chosen not to edit my clips just because this part is suuuch a drag.<br/>
+Why? Because I'm a fellow competition shooter too and editing in scores without a tool like this makes the editing process an even bigger pain in the ass than it already is and it's gotten to a point where I don't even release videos anymore due to this.<br/>
 Time stamped link to Andreas' video where he mentions his tool: https://youtu.be/AoIqM-fI8ag?t=629. You will clearly see the resemblance in funtionality.
 
 
 ## How do I use it?
+Unpack the contents of the zip file in a directory of your choice. Before using it, please read the sections below [Support? Issues?](https://github.com/TheBamse/SSI-Scoring-Overlay-Software/edit/main/README.md#support-issues) and [Security considerations](https://github.com/TheBamse/SSI-Scoring-Overlay-Software/edit/main/README.md#support-issues). You use this software on your own risk! I take no responsibilitys for anything, but I can't really see anything bad with it except for whats mentiond under the Security considerations :P<br/>
 The application is pretty self explanatory once it's started but you will need to edit a configuration file to get it working.<br/>
+As mentioned, the software scrapes your personal result page for a match and temporarily stores them in the application. Your personal result page does however not include the Rounds to be scored on that stage so if you want those included in the overlay you have the option to edit the scraped results before generating the overlay images. The edit function can also be handy if the scraped results are incorrect.<br/><br/>
 Along with the main executable is a config.json-file. The application will start without any edits but for the scraping to work you will at minimum need to edit in your SSI login and password.
-
 
 #### Additional settings
 If you want to change the font in the overlays, specify the path to the font file in the "font_path" setting.<br/>
