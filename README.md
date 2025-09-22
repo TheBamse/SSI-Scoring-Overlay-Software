@@ -7,6 +7,16 @@ No more, no less.
 
 As mentioned, the software scrapes your personal result page for a match and temporarily stores them in the application. Your persoanl result page does however not include the Rounds to be scored on that stage so if you want those included in the overlay you have the option to edit the scraped results before generating the overlay images. The edit function can also be handy if the scraped results are incorrect.
 
+
+## Screenshots
+Main window
+![Application main windows screenshot](./app_demo.png)
+
+Generated overlay for a sample stage
+![Application main windows screenshot](./12_Bay_1.png)
+
+Do note the padding added on the overlay image. The added 400 pixels of transparent nothing is to cirumvent some issues/limitations in DaVinci Resolve, my video editor of choice. This can be changed in the code if you don't want it.
+
 ## Why?
 This application was heavily inspired by the user Andreas_IPSC on youtube where he mentioned he created an application by himself that does the exact same thing. At the time of creating this he mentions in one of his videos that he has no current intention to release his application to the wild. So I thought I'd fire up a AI-code generator and have a go at it myself.<br/>
 Why? Because I'm a fellow competition shooter too and editing in scores without a tool like this makes the editing process an even bigger pain in the ass than it already is and I've even chosen not to edit my clips just because this part is suuuch a drag.<br/>
