@@ -20,7 +20,7 @@ Do note the padding added on the overlay image. The added 400 pixels of transpar
 ## Why?
 This application was heavily inspired by the user Andreas_IPSC on youtube where he mentioned he created an application by himself that does the exact same thing. At the time of creating this he mentions in one of his videos that he has no current intention to release his application to the wild. So I thought I'd fire up a AI-code generator and have a go at it myself.<br/>
 Why? Because I'm a fellow competition shooter too and editing in scores without a tool like this makes the editing process an even bigger pain in the ass than it already is and I've even chosen not to edit my clips just because this part is suuuch a drag.<br/>
-Time stamped link to Andreas' video where he mentions his tool: https://youtu.be/AoIqM-fI8ag?t=629. You will clearly see the resemblance in funtionality. I just wanted a slightly different layout.
+Time stamped link to Andreas' video where he mentions his tool: https://youtu.be/AoIqM-fI8ag?t=629. You will clearly see the resemblance in funtionality.
 
 
 ## How do I use it?
