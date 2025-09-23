@@ -43,5 +43,5 @@ This repo holds the most current version of the source code for the application 
 I'm mostly publishing the source code to prove I'm not I'm not collecting your SSI login information or anything like that.
 
 ## Security considerations
-As mentioned above; tthis application will store your SSI login and password in cleartext. If someone gets ahold of this file you login ionformation is of course compomized.<br/>
+As mentioned above; this application will store your SSI login and password in cleartext. If someone gets ahold of this file you login ionformation is of course compomized.<br/>
 It's on **YOU** to store this information in a safe manner.
