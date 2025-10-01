@@ -38,7 +38,7 @@ Debug mode is currently removed from the software,m do not enable it or scraping
 
 
 ## Support? Issues?
-I have no coding experience what so ever. I just fired up an AI-tool and described to it what I wanted. If the application stops working or featurtes are missing ... well, don't expect too much is what I'm saying. I'm not actively supporting or updating the application at all.<br/><br/>
+I have no coding experience what so ever. I just fired up an AI-tool and described to it what I wanted. If the application stops working or featurtes are missing ... well, don't expect too much is what I'm saying. I'm not actively supporting or updating the application at all. I will however update it and add new functionality when I feel like it. Feel free to leave a suggestion [here](https://github.com/TheBamse/SSI-Scoring-Overlay-Software/issues). Make sure to use the tag  $\color{Green}{\textsf{"suggestion"}}$.<br/><br/>
 This repo holds the most current version of the source code for the application if you want to check it out or do something like this on your own. Feel free to copy, do modifications or whatever you like. I would appreciate some kind of feedback if you do modify or share this someftware with someone else though.<br/>
 I'm mostly publishing the source code to prove I'm not I'm not collecting your SSI login information or anything like that.
 
