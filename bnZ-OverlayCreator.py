@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """
-bnZ-OverlayCreator.py  —  Baseline v5 (complete)
+bnZ-OverlayCreator.py  —  Baseline v5.2
 
-- Read settings from config.json (keys: ssi_username, ssi_password, font_path, output_dir, last_match_url, debug_mode)
-- If debug_mode True, read debug_rows.csv instead of scraping SSI
-- Login to https://shootnscoreit.com/login/ and scrape stage rows
-- Editable table (double click to edit single cell)
-- Preview overlay modal (Prev/Next/Save PNG), ESC closes, Left/Right keys navigate, 's' saves
-- Export CSV and Export Overlays
-- Overlays: 20px pill padding, 400px transparent top padding
-- Dark-themed Treeview + dark scrollbars
+Fixes:
+- Dark title bar on Windows
+- Removed extra status bar / scrollbar artifact
+- Preview window shows full first overlay immediately
 """
 
 from pathlib import Path
@@ -17,7 +13,6 @@ import os
 import sys
 import json
 import csv
-import io
 import requests
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -25,11 +20,11 @@ from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 # ------------------------
-# Resource helper (PyInstaller)
+# Resource helper
 # ------------------------
 def resource_path(relative_path):
     try:
-        base_path = sys._MEIPASS  # type: ignore
+        base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
@@ -47,10 +42,8 @@ if not Path(CONFIG_FILE).exists():
 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
     CONFIG = json.load(f)
 
-
 def cfg_get(key, default=None):
     return CONFIG.get(key, default)
-
 
 SSI_USERNAME = cfg_get("ssi_username")
 SSI_PASSWORD = cfg_get("ssi_password")
@@ -63,15 +56,12 @@ DEBUG_MODE = bool(cfg_get("debug_mode", False))
 if not SSI_USERNAME or not SSI_PASSWORD:
     raise ValueError("Missing 'ssi_username'/'ssi_password' in config.json.")
 
-
 def save_config():
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(CONFIG, f, indent=2)
 
-
 LOGIN_URL = "https://shootnscoreit.com/login/"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
 
 # ------------------------
 # SCRAPER
@@ -98,7 +88,6 @@ def create_logged_in_session():
 
     return session
 
-
 def _parse_table_rows_from_soup(soup):
     tables = soup.find_all("table")
     candidate_rows = []
@@ -113,7 +102,6 @@ def _parse_table_rows_from_soup(soup):
             return candidate_rows
     return candidate_rows
 
-
 def scrape_scores_live(session, match_url):
     r = session.get(match_url, timeout=15)
     soup = BeautifulSoup(r.text, "html.parser")
@@ -123,7 +111,6 @@ def scrape_scores_live(session, match_url):
     for cols in rows:
         if len(cols) < 10:
             continue
-        # skip totals rows
         if cols[0].lower().startswith(("total", "summary")):
             continue
         try:
@@ -143,7 +130,6 @@ def scrape_scores_live(session, match_url):
         except Exception:
             continue
     return stages
-
 
 def scrape_scores_debug_from_csv(csv_path="debug_rows.csv"):
     stages = []
@@ -172,7 +158,6 @@ def scrape_scores_debug_from_csv(csv_path="debug_rows.csv"):
                 continue
     return stages
 
-
 def scrape_scores(session, match_url):
     if DEBUG_MODE:
         return scrape_scores_debug_from_csv()
@@ -180,7 +165,7 @@ def scrape_scores(session, match_url):
 
 
 # ------------------------
-# OVERLAY (pills)
+# OVERLAY
 # ------------------------
 def make_overlay(stage_info, font_path=FONT_PATH, outpath=None, output_size=(2000, 300)):
     width, height = output_size
@@ -247,6 +232,24 @@ def make_overlay(stage_info, font_path=FONT_PATH, outpath=None, output_size=(200
 class ScoringApp(tk.Tk):
     def __init__(self):
         super().__init__()
+
+        # --- Enable dark title bar on Windows ---
+        try:
+            import ctypes
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.FindWindowW(None, self.title())
+            if hwnd:
+                DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+                set_dark_mode = ctypes.c_int(1)
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd,
+                    DWMWA_USE_IMMERSIVE_DARK_MODE,
+                    ctypes.byref(set_dark_mode),
+                    ctypes.sizeof(set_dark_mode)
+                )
+        except Exception:
+            pass
+
         self.title("SSI Scoring Scraper")
         self.configure(bg="#1e1e1e")
         if WINDOW_GEOMETRY:
@@ -267,14 +270,13 @@ class ScoringApp(tk.Tk):
                                   bg="#2d2d2d", fg="white", insertbackground="white")
         self.entry_url.pack(side="left", padx=(6, 8), fill="x", expand=True)
 
-        # simple button style via kwargs; methods exist below
         button_style = dict(bg="#3a3a3a", fg="white", activebackground="#505050", relief="flat", padx=10, pady=4)
         tk.Button(top, text="Scrape", command=self.on_scrape, **button_style).pack(side="left", padx=6)
         tk.Button(top, text="Preview Overlay", command=self.on_preview, **button_style).pack(side="left", padx=6)
         tk.Button(top, text="Export CSV", command=self.on_export_csv, **button_style).pack(side="left", padx=6)
         tk.Button(top, text="Export Overlays", command=self.on_export_overlays, **button_style).pack(side="left", padx=6)
 
-        # Dark-themed table + scrollbars
+        # Dark-themed table
         style = ttk.Style(self)
         style.theme_use("default")
         style.configure("Dark.Treeview",
@@ -296,19 +298,17 @@ class ScoringApp(tk.Tk):
             self.tree.heading(col, text=col)
             self.tree.column(col, anchor="center", width=110)
 
-        yscroll = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview, style="Dark.Vertical.TScrollbar")
-        xscroll = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview, style="Dark.Horizontal.TScrollbar")
-        self.tree.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
-
+        # yscroll = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview, style="Dark.Vertical.TScrollbar")
+        # self.tree.configure(yscrollcommand=yscroll.set)
         self.tree.pack(fill="both", expand=True, padx=8, pady=(6, 0))
-        yscroll.pack(side="right", fill="y")
-        xscroll.pack(side="bottom", fill="x")
-
-        # row tag styles for alternating colors
+        # yscroll.pack(side="right", fill="y")
+        # remove horizontal scrollbar packing
+        # xscroll = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview, style="Dark.Horizontal.TScrollbar")
+        # xscroll.pack(side="bottom", fill="x")
+        
+        # row tag styles
         self.tree.tag_configure("darkrow", background="#1e1e1e", foreground="white")
         self.tree.tag_configure("altrow", background="#252526", foreground="white")
-
-        # bind inline editing
         self.tree.bind("<Double-1>", self.on_edit_cell)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -359,7 +359,6 @@ class ScoringApp(tk.Tk):
         if not bbox:
             return
         x, y, width, height = bbox
-        # use a plain tk.Entry overlay for inline edit
         entry = tk.Entry(self.tree, bg="#2d2d2d", fg="white", insertbackground="white", relief="flat")
         entry.place(x=x, y=y, width=width, height=height)
 
@@ -372,7 +371,6 @@ class ScoringApp(tk.Tk):
             self.tree.set(row_id, col_name, new_val)
             entry.destroy()
             idx = self.tree.index(row_id)
-            # update underlying data structure
             self.stages[idx][col_name] = new_val
 
         entry.bind("<Return>", save_edit)
@@ -447,56 +445,78 @@ class PreviewWindow(tk.Toplevel):
         super().__init__(master)
         self.title("Overlay Preview")
         self.configure(bg="#1e1e1e")
-        # size will be adjusted later to image; default reasonable
-        self.geometry("1200x600")
+
         self.stages = stages
         self.index = index
 
-        # canvas for image
-        self.canvas = tk.Canvas(self, bg="#1e1e1e", highlightthickness=0)
-        self.canvas.pack(fill="both", expand=True)
+        # Prepare the image first
+        s = self.master._normalize_stage(self.stages[self.index])
+        pil_img = make_overlay(s, font_path=FONT_PATH, outpath=None)
 
-        # button row
+        # Scale image if too wide
+        max_width = 1100
+        if pil_img.width > max_width:
+            new_w = max_width
+            new_h = int(pil_img.height * new_w / pil_img.width)
+            display = pil_img.resize((new_w, new_h), Image.LANCZOS)
+        else:
+            display = pil_img
+
+        self.img_tk = ImageTk.PhotoImage(display)
+        img_w, img_h = display.size
+
+        # Set window geometry to fit image + button row
+        geom_w = max(img_w + 40, 500)
+        geom_h = img_h + 100  # extra space for buttons
+        self.geometry(f"{geom_w}x{geom_h}")
+
+        # Canvas exactly the size of the image
+        self.canvas = tk.Canvas(self, width=img_w, height=img_h, bg="#1e1e1e", highlightthickness=0)
+        self.canvas.pack(pady=(10, 0))  # small top padding
+        self.canvas.create_image(0, 0, image=self.img_tk, anchor="nw")  # draw at top-left
+
+        # Button frame
         btn_frame = tk.Frame(self, bg="#1e1e1e")
-        btn_frame.pack(pady=6)
-        btn_style = dict(bg="#3a3a3a", fg="white", activebackground="#505050", relief="flat", padx=10, pady=4)
+        btn_frame.pack(pady=10)
+        btn_style = dict(bg="#3a3a3a", fg="white", activebackground="#505050",
+                         relief="flat", padx=10, pady=4)
         tk.Button(btn_frame, text="◀ Previous", command=self.prev_stage, **btn_style).pack(side="left", padx=8)
         tk.Button(btn_frame, text="Next ▶", command=self.next_stage, **btn_style).pack(side="left", padx=8)
         tk.Button(btn_frame, text="Save PNG", command=self.save_current_png, **btn_style).pack(side="left", padx=8)
 
-        # keybindings
+        # Keybindings
         self.bind("<Left>", lambda e: self.prev_stage())
         self.bind("<Right>", lambda e: self.next_stage())
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("s", lambda e: self.save_current_png())
         self.focus_set()
 
-        self.show_stage()
-
     def show_stage(self):
         s = self.master._normalize_stage(self.stages[self.index])
         pil_img = make_overlay(s, font_path=FONT_PATH, outpath=None)
-        # scale to fit within window width if necessary
-        win_w = 1100
-        if pil_img.width > win_w:
-            new_w = win_w
+
+        # Scale image if necessary
+        max_width = 1100
+        if pil_img.width > max_width:
+            new_w = max_width
             new_h = int(pil_img.height * new_w / pil_img.width)
             display = pil_img.resize((new_w, new_h), Image.LANCZOS)
         else:
             display = pil_img
+
         self.img_tk = ImageTk.PhotoImage(display)
+        img_w, img_h = display.size
+
+        # Resize canvas to image size
+        self.canvas.config(width=img_w, height=img_h)
         self.canvas.delete("all")
-        # center image on canvas
-        cw = max(display.width, 1)
-        ch = max(display.height, 1)
-        # resize window to image height + controls (but avoid tiny or too large)
-        try:
-            geom_h = ch + 120
-            geom_w = max(display.width + 40, 500)
-            self.geometry(f"{geom_w}x{geom_h}")
-        except Exception:
-            pass
-        self.canvas.create_image((self.winfo_width() // 2), (self.winfo_height() // 2 - 20), image=self.img_tk, anchor="center")
+        self.canvas.create_image(0, 0, image=self.img_tk, anchor="nw")
+
+        # Resize window to fit image + buttons
+        geom_w = max(img_w + 40, 500)
+        geom_h = img_h + 100
+        self.geometry(f"{geom_w}x{geom_h}")
+
         self.title(f"Overlay Preview — {s.get('Stage','')}")
 
     def save_current_png(self):
@@ -518,7 +538,6 @@ class PreviewWindow(tk.Toplevel):
         if self.index < len(self.stages) - 1:
             self.index += 1
             self.show_stage()
-
 
 # ------------------------
 # MAIN
