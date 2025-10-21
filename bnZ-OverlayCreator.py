@@ -289,7 +289,7 @@ class ScoringApp(tk.Tk):
         except Exception:
             pass
 
-        self.title("SSI Scoring Scraper")
+        self.title("SSI Scoring Overlay Software")
         self.configure(bg="#1e1e1e")
         if WINDOW_GEOMETRY:
             self.geometry(WINDOW_GEOMETRY)
