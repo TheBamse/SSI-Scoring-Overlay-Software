@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-bnZ-OverlayCreator.py  —  Baseline v5.2
+bnZ-OverlayCreator.py  —  Baseline v6.0
 
 Fixes:
 - Dark title bar on Windows
@@ -171,7 +171,10 @@ def scrape_scores(session, match_url):
 # ------------------------
 # OVERLAY
 # ------------------------
-def make_overlay(stage_info, font_path=FONT_PATH, outpath=None, output_width=1920, top_padding=400):
+def make_overlay(stage_info, font_path=FONT_PATH, outpath=None, output_width=None, top_padding=400):
+    # Use configured OUTPUT_WIDTH if not explicitly provided
+    if output_width is None:
+        output_width = OUTPUT_WIDTH
     spacing = 20
     base_hpad = 20
     base_vpad = 20
