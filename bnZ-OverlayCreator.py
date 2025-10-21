@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-bnZ-OverlayCreator.py  —  Baseline v6.0
+bnZ-OverlayCreator.py  —  Baseline v7.0
 
 Fixes:
 - Dark title bar on Windows
