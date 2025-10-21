@@ -1,5 +1,17 @@
 Hi there fellow competition shooter!
 
+## Lastest updates
+Just completed version 2 of the software. Not much new functionality was added but here's a changelog:
+* New dark themed UI! :)
+* Better debug mode (to enable, change debug_mode from false to true in config.json)
+* New option in config.json; output_width. If not set or used the application will continue to output images i 1920x1080 (default in the code as well as example config.json in the release ZIP is 1920).
+This can be set to, for example, 3840 to produce images in 4k.
+Do note that the pills does not scale. Will probably revisit this as some point.
+* Under the hood maintenance for the preview function, .csv exports and such.
+* Added an icon to the application .exe. Woah :P
+
+If you dont like the new version you can still use version 1, it's up to you! :)
+
 ## What the hell is this?
 
 This is an AI-prompt generated application that scrapes the IPSC scoring site [shootnscoreit.com](https://shootnscoreit.com) for your match results and then generates overlay images that can be used when editing your match footage.<br/>
@@ -7,11 +19,11 @@ No more, no less.
 
 
 ## Screenshots
-Main window
-![Application main windows screenshot](./app_demo.png)
+Main window (updated for version 2.0!)
+![Application main windows screenshot](./app_demo20.png)
 
 Generated overlay for a sample stage
-![Application main windows screenshot](./12_Bay_1.png)
+![Application main windows screenshot](./7_Stage_7.png)
 
 Do note the padding added on the top of the overlay image. The added 400 pixels of transparent nothing is to cirvumvent some issues/limitations in DaVinci Resolve, my video editor of choice. This can be changed in the code if you don't want it.
 
@@ -42,6 +54,6 @@ I have no coding experience what so ever. I just fired up an AI-tool and describ
 This repo holds the most current version of the source code for the application if you want to check it out or do something like this on your own. Feel free to copy, do modifications or whatever you like. I would appreciate some kind of feedback if you do modify or share this someftware with someone else though.<br/>
 I'm mostly publishing the source code to prove I'm not I'm not collecting your SSI login information or anything like that.
 
-## Security considerations
+## Security considerations - PLEASE READ
 As mentioned above; this application will store your SSI login and password in clear text. If someone gets hold of this file you login information is, of course, compromized.<br/>
 It's on **YOU** to store this information in a safe manner.
