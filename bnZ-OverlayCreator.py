@@ -33,10 +33,18 @@ def resource_path(relative_path):
 # ------------------------
 # CONFIG
 # ------------------------
-CONFIG_FILE = resource_path("config.json")
-if not Path(CONFIG_FILE).exists():
+# Look for config.json next to the script or exe
+if getattr(sys, "frozen", False):
+    # Running in a PyInstaller bundle
+    base_dir = Path(sys.executable).parent
+else:
+    base_dir = Path(__file__).parent
+
+CONFIG_FILE = base_dir / "config.json"
+
+if not CONFIG_FILE.exists():
     raise FileNotFoundError(
-        "Missing config.json. Create it with keys: 'ssi_username','ssi_password','font_path','output_dir'."
+        f"Missing config.json in the same directory as the script/exe ({CONFIG_FILE})"
     )
 
 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
