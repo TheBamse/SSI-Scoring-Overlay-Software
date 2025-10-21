@@ -49,6 +49,7 @@ SSI_USERNAME = cfg_get("ssi_username")
 SSI_PASSWORD = cfg_get("ssi_password")
 FONT_PATH = resource_path(cfg_get("font_path", "DejaVuSans-Bold.ttf"))
 OUTPUT_DIR = Path(cfg_get("output_dir", "overlays"))
+OUTPUT_WIDTH = int(cfg_get("output_width", 1920))
 LAST_MATCH_URL = cfg_get("last_match_url", "")
 WINDOW_GEOMETRY = cfg_get("window_geometry", None)
 DEBUG_MODE = bool(cfg_get("debug_mode", False))
@@ -159,24 +160,22 @@ def scrape_scores_debug_from_csv(csv_path="debug_rows.csv"):
     return stages
 
 def scrape_scores(session, match_url):
-    if DEBUG_MODE:
-        return scrape_scores_debug_from_csv()
+    debug_file = "debug_rows.csv"
+    # If DEBUG_MODE and the file exists, load debug CSV
+    if DEBUG_MODE and os.path.exists(debug_file):
+        return scrape_scores_debug_from_csv(debug_file)
+    # Otherwise scrape live
     return scrape_scores_live(session, match_url)
 
 
 # ------------------------
 # OVERLAY
 # ------------------------
-def make_overlay(stage_info, font_path=FONT_PATH, outpath=None, output_size=(2000, 300)):
-    width, height = output_size
-    img = Image.new("RGBA", (width, height + 400), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-
-    try:
-        font_value = ImageFont.truetype(font_path, 32)
-    except Exception:
-        font_value = ImageFont.load_default()
-
+def make_overlay(stage_info, font_path=FONT_PATH, outpath=None, output_width=1920, top_padding=400):
+    spacing = 20
+    base_hpad = 20
+    base_vpad = 20
+    radius = 18
     colors = {
         "A": (50, 205, 50),
         "C": (255, 165, 0),
@@ -188,43 +187,72 @@ def make_overlay(stage_info, font_path=FONT_PATH, outpath=None, output_size=(200
     bg_color = (40, 40, 40, 220)
     outline_color = (255, 255, 255, 255)
 
-    def draw_pill(x, y, label, value=None, color="white", hpad=20, vpad=20, radius=18):
-        text = str(label) if value is None else f"{label}: {value}"
-        minx, miny, maxx, maxy = draw.textbbox((0, 0), text, font=font_value)
+    try:
+        font_value = ImageFont.truetype(font_path, 32)
+    except Exception:
+        font_value = ImageFont.load_default()
+
+    pill_data = []
+    def pill_text(key, value=None):
+        return str(key) if value is None else f"{key}: {value}"
+
+    # Stage and standard pills
+    pill_data.append(("Stage", stage_info.get("Stage", ""), "white"))
+    pill_data.append(("Time", f"{float(stage_info.get('Time',0)):.2f}", "white"))
+    pill_data.append(("HF", f"{float(stage_info.get('HF',0)):.2f}", "white"))
+    if stage_info.get("Rounds"):
+        pill_data.append(("Rounds", stage_info["Rounds"], "white"))
+    for key in ("A", "C", "D", "M", "NS", "P"):
+        pill_data.append((key, stage_info.get(key,0), colors.get(key,"white")))
+
+    # Compute natural widths and max height
+    natural_widths = []
+    pill_heights = []
+    for label, value, color in pill_data:
+        text = pill_text(label, value)
+        minx, miny, maxx, maxy = ImageDraw.Draw(Image.new("RGBA",(10,10))).textbbox((0,0), text, font=font_value)
         text_w = maxx - minx
         text_h = maxy - miny
-        pill_w = int(text_w + 2 * hpad)
-        pill_h = int(text_h + 2 * vpad)
+        natural_widths.append(text_w + 2*base_hpad)
+        pill_heights.append(text_h + 2*base_vpad)
 
-        draw.rounded_rectangle([x, y, x + pill_w, y + pill_h],
-                               radius=radius, outline=outline_color, width=2, fill=bg_color)
-        draw.text((x + hpad - minx, y + vpad - miny), text, font=font_value, fill=color)
-        return pill_w, pill_h
+    max_h = max(pill_heights)
+    total_natural_width = sum(natural_widths) + spacing*(len(pill_data)-1)
+    scale = min(1.0, output_width / total_natural_width)
 
-    x, y = 20, 400
-    spacing = 20
-    max_h = 0
+    # Compute starting x to center pills
+    total_scaled_width = sum(int(w * scale) for w in natural_widths) + spacing*(len(pill_data)-1)
+    x = max(20, (output_width - total_scaled_width)//2)
+    y = top_padding
 
-    w, h = draw_pill(x, y, stage_info.get("Stage", ""), None, "white"); x += w + spacing; max_h = max(max_h, h)
-    w, h = draw_pill(x, y, "Time", f"{float(stage_info.get('Time', 0)):.2f}", "white"); x += w + spacing; max_h = max(max_h, h)
-    w, h = draw_pill(x, y, "HF", f"{float(stage_info.get('HF', 0)):.2f}", "white"); x += w + spacing; max_h = max(max_h, h)
+    # Create image
+    img = Image.new("RGBA", (output_width, top_padding + max_h), (0,0,0,0))
+    draw = ImageDraw.Draw(img)
 
-    if stage_info.get("Rounds"):
-        w, h = draw_pill(x, y, "Rounds", stage_info["Rounds"], "white"); x += w + spacing; max_h = max(max_h, h)
+    # Draw pills with vertically centered text
+    for i, (label, value, color) in enumerate(pill_data):
+        text = pill_text(label, value)
+        minx, miny, maxx, maxy = draw.textbbox((0,0), text, font=font_value)
+        text_w = maxx - minx
+        text_h = maxy - miny
+        pill_w = int(natural_widths[i] * scale)
+        pill_h = max_h
+        # Vertical centering
+        text_y = y + (pill_h - text_h)//2 - miny
 
-    for key in ("A", "C", "D", "M", "NS", "P"):
-        w, h = draw_pill(x, y, key, stage_info.get(key, 0), colors.get(key, "white")); x += w + spacing; max_h = max(max_h, h)
+        # Stage pill visual tweak
+        if label == "Stage":
+            text_y += 4  # nudge down for visual centering
 
-    right_edge = x - spacing
-    bottom_edge = y + max_h
-    crop_box = (0, 0, right_edge + 20, bottom_edge + 20)
-    img = img.crop(crop_box)
+        draw.rounded_rectangle([x, y, x + pill_w, y + pill_h], radius=radius, outline=outline_color, width=2, fill=bg_color)
+        text_x = x + (pill_w - text_w)//2 - minx
+        draw.text((text_x, text_y), text, font=font_value, fill=color)
+        x += pill_w + spacing
 
-    if outpath is None:
-        return img
-    img.save(outpath, "PNG")
-    return outpath
-
+    if outpath:
+        img.save(outpath, "PNG")
+        return outpath
+    return img
 
 # ------------------------
 # GUI
@@ -332,20 +360,50 @@ class ScoringApp(tk.Tk):
         if not url:
             messagebox.showerror("Error", "Enter a match URL first.")
             return
+
         try:
-            if not DEBUG_MODE:
-                self.session = create_logged_in_session()
-            self.stages = scrape_scores(self.session, url)
+            self.stages = []
+            debug_file = "debug_rows.csv"
+
+            # Step 1: Load debug CSV if present and debug mode
+            if DEBUG_MODE and os.path.exists(debug_file):
+                self.stages = scrape_scores_debug_from_csv(debug_file)
+                print("[DEBUG] Loaded stages from debug_rows.csv")
+
+            # Step 2: Live scrape if stages are empty
+            if not self.stages:
+                self.session = create_logged_in_session()  # always create session for live scraping
+                self.stages = scrape_scores_live(self.session, url)
+                if DEBUG_MODE:
+                    print("[INFO] Scraped stages online")
+
+            # Step 3: Check if we actually got any data
+            if not self.stages:
+                messagebox.showerror("No data", "No valid stages found.")
+                return
+
+            # Step 4: Refresh table and save last URL
+            self._refresh_table()
+            CONFIG["last_match_url"] = url
+            save_config()
+
+            # Optional debug-only success popup with CSV info
+            if DEBUG_MODE:
+                if os.path.exists(debug_file):
+                    messagebox.showinfo(
+                        "Success",
+                        f"DEBUG_MODE is ON — loaded {len(self.stages)} stages from debug_rows.csv."
+                    )
+                else:
+                    messagebox.showinfo(
+                        "Success",
+                        f"DEBUG_MODE is ON — scraped {len(self.stages)} stages online."
+                    )
+
         except Exception as e:
-            messagebox.showerror("Error", str(e))
-            return
-        if not self.stages:
-            messagebox.showinfo("No data", "No valid stages found.")
-            return
-        self._refresh_table()
-        CONFIG["last_match_url"] = url
-        save_config()
-        messagebox.showinfo("Success", f"Scraped {len(self.stages)} stages.")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Error", f"Scraping failed:\n{e}")
 
     def on_edit_cell(self, event):
         row_id = self.tree.identify_row(event.y)
