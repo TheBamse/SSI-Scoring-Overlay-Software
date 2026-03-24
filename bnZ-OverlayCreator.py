@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
 """
-TODO:
-* Fix color selection. Make "Overlay Colors" more like a header. Just bold it perhaps?
-* Remove the HIT:-part of each line.
-    Replace (miss) with (Mike)
-    Add (Proc.) to P:      
-    Ppl who use this generally know what's up. It's niche as hell as is :)
-* Hovering the color changes the cursor to hand but nothing happens when clicked. Make it open the color picker like the button.
-* The "Reset colors to default" looks dimmed but is clickable.
-*
-
 bnZ-OverlayCreator.py  —  Baseline v7.4
 
 Fixes applied over v7.3:
@@ -547,6 +537,7 @@ class ScoringApp(tk.Tk):
 
         cur_val = self.tree.set(row_id, col_name)
         entry.insert(0, cur_val)
+        entry.select_range(0, "end")
         entry.focus()
 
         def save_edit(event=None):
@@ -561,11 +552,11 @@ class ScoringApp(tk.Tk):
         entry.bind("<Escape>", lambda e: entry.destroy())
 
     def on_preview(self):
-        sel = self.tree.selection()
-        if not sel:
-            messagebox.showwarning("No selection", "Select a stage first.")
+        if not self.stages:
+            messagebox.showwarning("No data", "Scrape first.")
             return
-        idx = self.tree.index(sel[0])
+        sel = self.tree.selection()
+        idx = self.tree.index(sel[0]) if sel else 0
         PreviewWindow(self, self.stages, idx)
 
     def on_export_csv(self):
@@ -697,12 +688,12 @@ class SettingsWindow(tk.Toplevel):
 
     # Labels for each color key
     _COLOR_LABELS = [
-        ("A",       "Hit: A"),
-        ("C",       "Hit: C"),
-        ("D",       "Hit: D"),
-        ("M",       "Hit: M (miss)"),
-        ("NS",      "Hit: NS"),
-        ("P",       "Hit: P"),
+        ("A",       "A"),
+        ("C",       "C"),
+        ("D",       "D"),
+        ("M",       "M (Mike)"),
+        ("NS",      "NS"),
+        ("P",       "P (Proc.)"),
         ("bg",      "Pill background"),
         ("outline", "Pill outline"),
     ]
@@ -824,10 +815,10 @@ class SettingsWindow(tk.Toplevel):
             sticky="ew", padx=pad_x, pady=(10, 4)
         )
 
-        tk.Label(self, text="Overlay Colors", bg="#1e1e1e", fg="#aaaaaa",
-                 font=("Segoe UI", 9, "italic")).grid(
+        tk.Label(self, text="Overlay Colors", bg="#1e1e1e", fg="white",
+                 font=("Segoe UI", 10, "bold")).grid(
             row=color_sep_row + 1, column=0, columnspan=2,
-            padx=pad_x, pady=(0, 4), sticky="w"
+            padx=pad_x, pady=(4, 4), sticky="w"
         )
 
         current_colors = get_overlay_colors()
@@ -850,6 +841,7 @@ class SettingsWindow(tk.Toplevel):
                                borderwidth=1, cursor="hand2")
             swatch.pack(side="left", ipady=6, padx=(0, 8))
             self._color_swatches[ckey] = swatch
+            swatch.bind("<Button-1>", lambda e, k=ckey: self._pick_color(k))
 
             # RGB label showing current values
             alpha_part = f", A:{rgba[3]}" if len(rgba) == 4 else ""
@@ -858,38 +850,15 @@ class SettingsWindow(tk.Toplevel):
                                   font=("Segoe UI", 9), width=28, anchor="w")
             rgb_label.pack(side="left")
 
-            def _make_pick(k=ckey, sw=swatch, lbl=rgb_label):
-                def _pick():
-                    current_rgb = self._color_values[k][:3]
-                    init_hex = "#{:02x}{:02x}{:02x}".format(*current_rgb)
-                    result = colorchooser.askcolor(
-                        color=init_hex,
-                        title=f"Choose color for {k}",
-                        parent=self,
-                    )
-                    # result is ((r,g,b), '#rrggbb') or (None, None)
-                    if result and result[0]:
-                        r, g, b = (int(x) for x in result[0])
-                        # Preserve original alpha if present
-                        alpha = self._color_values[k][3] if len(self._color_values[k]) == 4 else None
-                        self._color_values[k] = [r, g, b] + ([alpha] if alpha is not None else [])
-                        sw.config(bg="#{:02x}{:02x}{:02x}".format(r, g, b))
-                        alpha_part = f", A:{alpha}" if alpha is not None else ""
-                        lbl.config(text=f"R:{r}  G:{g}  B:{b}{alpha_part}")
-                return _pick
-
-            tk.Button(frame, text="Change…", command=_make_pick(), **BTN_STYLE).pack(
-                side="left", padx=(0, 0)
-            )
+            tk.Button(frame, text="Change…", command=lambda k=ckey: self._pick_color(k),
+                      **BTN_STYLE).pack(side="left", padx=(0, 0))
 
         # Reset to defaults button
         reset_row = color_sep_row + 2 + len(self._COLOR_LABELS)
         tk.Button(
             self, text="Reset colors to defaults",
             command=self._reset_colors,
-            bg="#2d2d2d", fg="#aaaaaa",
-            activebackground="#3a3a3a", relief="flat", padx=8, pady=3,
-            font=("Segoe UI", 9)
+            **BTN_STYLE
         ).grid(row=reset_row, column=0, columnspan=2, pady=(6, 2))
 
         # Final separator + buttons
@@ -916,6 +885,30 @@ class SettingsWindow(tk.Toplevel):
         my = master.winfo_y() + master.winfo_height() // 2
         w, h = self.winfo_width(), self.winfo_height()
         self.geometry(f"+{mx - w // 2}+{my - h // 2}")
+
+    def _pick_color(self, k):
+        """Open the system color picker for color key k, update swatch and label."""
+        current_rgb = self._color_values[k][:3]
+        init_hex = "#{:02x}{:02x}{:02x}".format(*current_rgb)
+        result = colorchooser.askcolor(
+            color=init_hex,
+            title=f"Choose color — {k}",
+            parent=self,
+        )
+        # result is ((r,g,b), '#rrggbb') or (None, None) if cancelled
+        if not result or not result[0]:
+            return
+        r, g, b = (int(x) for x in result[0])
+        alpha = self._color_values[k][3] if len(self._color_values[k]) == 4 else None
+        self._color_values[k] = [r, g, b] + ([alpha] if alpha is not None else [])
+        sw = self._color_swatches[k]
+        sw.config(bg="#{:02x}{:02x}{:02x}".format(r, g, b))
+        # Update the rgb label sitting next to the swatch in the same frame
+        alpha_part = f", A:{alpha}" if alpha is not None else ""
+        for widget in sw.master.winfo_children():
+            if isinstance(widget, tk.Label) and widget is not sw:
+                widget.config(text=f"R:{r}  G:{g}  B:{b}{alpha_part}")
+                break
 
     def _reset_colors(self):
         """Restore all color swatches to DEFAULT_COLORS."""
