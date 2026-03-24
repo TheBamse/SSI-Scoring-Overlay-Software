@@ -1,7 +1,7 @@
 Hi there fellow competition shooter!
 
 ## Lastest updates
-Just completed version 2.5 of the software. Not much new functionality was added but here's a changelog:
+Just completed version 2.5 of the software. Some new functionality was added and here's the changelog:
 
 ### New features:
 * Add the option to edit the application config from within the application. If no config.json is present, create one using some defaults and prompts for login details for SSI
