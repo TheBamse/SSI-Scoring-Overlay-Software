@@ -57,7 +57,6 @@ Feel free to manually edit your config.json file but not sure why you'd want to.
 I have no coding experience what so ever. I just fired up an AI-tool and described to it what I wanted. If the application stops working or features are missing ... well, don't expect too much is what I'm saying. I'm not actively supporting or updating the application at all. I will however update it and add new functionality when I feel like it. Feel free to leave a suggestion [here](https://github.com/TheBamse/SSI-Scoring-Overlay-Software/issues). Make sure to use the tag  $\color{Green}{\textsf{"suggestion"}}$.<br/><br/>
 This repo holds the most current version of the source code for the application if you want to check it out or do something like this on your own. Feel free to copy, do modifications or whatever you like. I would appreciate some kind of feedback if you do modify or share this someftware with someone else though.<br/>
 I'm mostly publishing the source code to prove I'm not I'm not collecting your SSI login information or anything like that.<br/><br/>
-
 If you have any suggested improvements you've made to your own fork or local copy, please make a pull request and lets make the application better together! <3
 
 ## Security considerations - PLEASE READ
