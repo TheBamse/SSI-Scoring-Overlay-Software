@@ -1,11 +1,27 @@
 #!/usr/bin/env python3
 """
-bnZ-OverlayCreator.py  —  Baseline v7.4
+bnZ-OverlayCreator.py  —  v2.5
 
-Fixes applied over v7.3:
-- Scrape button re-enable handled explicitly per path (no finally race)
-- Friendly error dialogs for login failure vs network/other errors
-- NameError on lambda capture of except variable fixed
+Changes in v2.5:
+- Auto-create config.json with defaults on first run (no crash on missing file)
+- First-run welcome dialog opens Settings automatically
+- Scrape guard: friendly error if credentials are empty
+- Overlay colors configurable via Settings with live swatch preview
+- Native system color picker (RGB) for each pill color, bg, and outline
+- Reset colors to defaults button in Settings
+- "Overlay Colors" section header styled to match other labels
+- Color labels cleaned up: removed "Hit:" prefix, M (Mike), P (Proc.)
+- Clicking color swatch opens picker (same as Change… button)
+- Preview Overlay defaults to first stage when none selected
+- Double-click cell edit: existing value pre-selected for immediate overtype
+- Stage column auto-sizes to longest name after scrape
+- Login rewritten: direct POST, URL-based success detection, no wasted GET
+- Scrape runs in background thread — GUI stays responsive
+- Scrape button re-enable handled per path (no finally race condition)
+- Friendly error dialogs: login failure vs network/scrape errors
+- Error logging to error.log next to app (PyInstaller-compatible)
+- Settings dialog: edit all config fields including credentials and paths
+- All overlay colors editable and persisted to config.json
 """
 
 from pathlib import Path
