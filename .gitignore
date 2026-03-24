@@ -1,5 +1,7 @@
-config.json
 overlays/
+.venv/
+config.json
 debug_rows.csv
 debug_rows.csv1
 icon.ico
+error.log
