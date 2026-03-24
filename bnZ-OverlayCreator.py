@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 """
+TODO:
+* Fix color selection. Make "Overlay Colors" more like a header. Just bold it perhaps?
+* Remove the HIT:-part of each line.
+    Replace (miss) with (Mike)
+    Add (Proc.) to P:      
+    Ppl who use this generally know what's up. It's niche as hell as is :)
+* Hovering the color changes the cursor to hand but nothing happens when clicked. Make it open the color picker like the button.
+* The "Reset colors to default" looks dimmed but is clickable.
+*
+
 bnZ-OverlayCreator.py  —  Baseline v7.4
 
 Fixes applied over v7.3:
@@ -17,7 +27,7 @@ import logging
 import threading
 import requests
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, colorchooser
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
@@ -107,6 +117,30 @@ BTN_STYLE = dict(
     activebackground="#505050",
     relief="flat", padx=10, pady=4
 )
+
+# Default overlay colors — used as fallback if not present in config.json
+DEFAULT_COLORS = {
+    "A":       (50,  205,  50),
+    "C":       (255, 165,   0),
+    "D":       (255, 105, 180),
+    "M":       (220,  20,  60),
+    "NS":      (138,  43, 226),
+    "P":       (255, 215,   0),
+    "bg":      (40,   40,  40, 220),
+    "outline": (255, 255, 255, 255),
+}
+
+def get_overlay_colors():
+    """Return overlay colors from CONFIG, falling back to defaults for any missing key."""
+    saved = CONFIG.get("colors", {})
+    result = {}
+    for key, default in DEFAULT_COLORS.items():
+        val = saved.get(key)
+        if val and isinstance(val, list) and len(val) >= len(default):
+            result[key] = tuple(val[:len(default)])
+        else:
+            result[key] = default
+    return result
 
 # ------------------------
 # SCRAPER
@@ -234,16 +268,10 @@ def make_overlay(stage_info, font_path=FONT_PATH, outpath=None, output_width=Non
     if output_width is None:
         output_width = OUTPUT_WIDTH
 
-    colors = {
-        "A": (50, 205, 50),
-        "C": (255, 165, 0),
-        "D": (255, 105, 180),
-        "M": (220, 20, 60),
-        "NS": (138, 43, 226),
-        "P": (255, 215, 0),
-    }
-    bg_color = (40, 40, 40, 220)
-    outline_color = (255, 255, 255, 255)
+    _oc = get_overlay_colors()
+    colors = {k: _oc[k] for k in ("A", "C", "D", "M", "NS", "P")}
+    bg_color = _oc["bg"]
+    outline_color = _oc["outline"]
 
     try:
         font_value = ImageFont.truetype(font_path, PILL_FONT_SIZE)
@@ -667,6 +695,18 @@ class SettingsWindow(tk.Toplevel):
         ("debug_mode",     "Debug Mode",     "bool"),
     ]
 
+    # Labels for each color key
+    _COLOR_LABELS = [
+        ("A",       "Hit: A"),
+        ("C",       "Hit: C"),
+        ("D",       "Hit: D"),
+        ("M",       "Hit: M (miss)"),
+        ("NS",      "Hit: NS"),
+        ("P",       "Hit: P"),
+        ("bg",      "Pill background"),
+        ("outline", "Pill outline"),
+    ]
+
     def __init__(self, master):
         super().__init__(master)
         self.title("Settings")
@@ -679,6 +719,10 @@ class SettingsWindow(tk.Toplevel):
 
         self._vars = {}       # config_key -> tk variable
         self._show_pw = {}    # config_key -> bool (password visibility toggle)
+        # color_key -> current tuple (r,g,b) or (r,g,b,a)
+        self._color_values = {}
+        # color_key -> the swatch tk.Label widget
+        self._color_swatches = {}
 
         LABEL_W = 18
         ENTRY_W = 48
@@ -771,14 +815,90 @@ class SettingsWindow(tk.Toplevel):
                     row=row_i, column=1, padx=(0, pad_x), pady=pad_y, sticky="w"
                 )
 
-        # Separator
-        sep_row = len(self._FIELDS)
+        # --- Color section ---
+        fields_count = len(self._FIELDS)
+        color_sep_row = fields_count
+
+        ttk.Separator(self, orient="horizontal").grid(
+            row=color_sep_row, column=0, columnspan=2,
+            sticky="ew", padx=pad_x, pady=(10, 4)
+        )
+
+        tk.Label(self, text="Overlay Colors", bg="#1e1e1e", fg="#aaaaaa",
+                 font=("Segoe UI", 9, "italic")).grid(
+            row=color_sep_row + 1, column=0, columnspan=2,
+            padx=pad_x, pady=(0, 4), sticky="w"
+        )
+
+        current_colors = get_overlay_colors()
+
+        for i, (ckey, clabel) in enumerate(self._COLOR_LABELS):
+            row = color_sep_row + 2 + i
+            rgba = current_colors[ckey]
+            self._color_values[ckey] = list(rgba)
+
+            tk.Label(self, text=clabel + ":", **lbl_cfg).grid(
+                row=row, column=0, padx=(pad_x, 8), pady=(3, 3), sticky="w"
+            )
+
+            frame = tk.Frame(self, bg="#1e1e1e")
+            frame.grid(row=row, column=1, padx=(0, pad_x), pady=(3, 3), sticky="w")
+
+            # Swatch — 40×22 px colored rectangle
+            hex_col = "#{:02x}{:02x}{:02x}".format(rgba[0], rgba[1], rgba[2])
+            swatch = tk.Label(frame, bg=hex_col, width=4, relief="solid",
+                               borderwidth=1, cursor="hand2")
+            swatch.pack(side="left", ipady=6, padx=(0, 8))
+            self._color_swatches[ckey] = swatch
+
+            # RGB label showing current values
+            alpha_part = f", A:{rgba[3]}" if len(rgba) == 4 else ""
+            rgb_text = f"R:{rgba[0]}  G:{rgba[1]}  B:{rgba[2]}{alpha_part}"
+            rgb_label = tk.Label(frame, text=rgb_text, bg="#1e1e1e", fg="#cccccc",
+                                  font=("Segoe UI", 9), width=28, anchor="w")
+            rgb_label.pack(side="left")
+
+            def _make_pick(k=ckey, sw=swatch, lbl=rgb_label):
+                def _pick():
+                    current_rgb = self._color_values[k][:3]
+                    init_hex = "#{:02x}{:02x}{:02x}".format(*current_rgb)
+                    result = colorchooser.askcolor(
+                        color=init_hex,
+                        title=f"Choose color for {k}",
+                        parent=self,
+                    )
+                    # result is ((r,g,b), '#rrggbb') or (None, None)
+                    if result and result[0]:
+                        r, g, b = (int(x) for x in result[0])
+                        # Preserve original alpha if present
+                        alpha = self._color_values[k][3] if len(self._color_values[k]) == 4 else None
+                        self._color_values[k] = [r, g, b] + ([alpha] if alpha is not None else [])
+                        sw.config(bg="#{:02x}{:02x}{:02x}".format(r, g, b))
+                        alpha_part = f", A:{alpha}" if alpha is not None else ""
+                        lbl.config(text=f"R:{r}  G:{g}  B:{b}{alpha_part}")
+                return _pick
+
+            tk.Button(frame, text="Change…", command=_make_pick(), **BTN_STYLE).pack(
+                side="left", padx=(0, 0)
+            )
+
+        # Reset to defaults button
+        reset_row = color_sep_row + 2 + len(self._COLOR_LABELS)
+        tk.Button(
+            self, text="Reset colors to defaults",
+            command=self._reset_colors,
+            bg="#2d2d2d", fg="#aaaaaa",
+            activebackground="#3a3a3a", relief="flat", padx=8, pady=3,
+            font=("Segoe UI", 9)
+        ).grid(row=reset_row, column=0, columnspan=2, pady=(6, 2))
+
+        # Final separator + buttons
+        sep_row = reset_row + 1
         ttk.Separator(self, orient="horizontal").grid(
             row=sep_row, column=0, columnspan=2,
             sticky="ew", padx=pad_x, pady=(8, 4)
         )
 
-        # Buttons row
         btn_frame = tk.Frame(self, bg="#1e1e1e")
         btn_frame.grid(row=sep_row + 1, column=0, columnspan=2, pady=(4, 12))
         tk.Button(btn_frame, text="Save", width=10, command=self._save, **BTN_STYLE).pack(
@@ -788,7 +908,6 @@ class SettingsWindow(tk.Toplevel):
             side="left", padx=8
         )
 
-        self.bind("<Return>", lambda e: self._save())
         self.bind("<Escape>", lambda e: self.destroy())
 
         # Centre over the main window
@@ -797,6 +916,21 @@ class SettingsWindow(tk.Toplevel):
         my = master.winfo_y() + master.winfo_height() // 2
         w, h = self.winfo_width(), self.winfo_height()
         self.geometry(f"+{mx - w // 2}+{my - h // 2}")
+
+    def _reset_colors(self):
+        """Restore all color swatches to DEFAULT_COLORS."""
+        for ckey, default in DEFAULT_COLORS.items():
+            self._color_values[ckey] = list(default)
+            r, g, b = default[0], default[1], default[2]
+            alpha = default[3] if len(default) == 4 else None
+            if ckey in self._color_swatches:
+                self._color_swatches[ckey].config(bg="#{:02x}{:02x}{:02x}".format(r, g, b))
+            # Update rgb labels by re-querying the frame children
+            for widget in self._color_swatches[ckey].master.winfo_children():
+                if isinstance(widget, tk.Label) and widget is not self._color_swatches[ckey]:
+                    alpha_part = f", A:{alpha}" if alpha is not None else ""
+                    widget.config(text=f"R:{r}  G:{g}  B:{b}{alpha_part}")
+                    break
 
     def _save(self):
         for key, var in self._vars.items():
@@ -807,12 +941,16 @@ class SettingsWindow(tk.Toplevel):
             else:
                 CONFIG[key] = str(value).strip()
 
+        # Save colors — stored as lists so JSON can serialise them
+        CONFIG["colors"] = {k: v for k, v in self._color_values.items()}
+
         save_config()
         messagebox.showinfo(
             "Settings saved",
             "Settings have been saved to config.json.\n\n"
             "Changes to username, password, font path, and output directory\n"
-            "will take effect the next time you start the application.",
+            "will take effect the next time you start the application.\n\n"
+            "Color changes take effect immediately.",
             parent=self,
         )
         self.destroy()
