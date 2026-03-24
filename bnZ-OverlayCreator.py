@@ -60,10 +60,32 @@ logger = logging.getLogger(__name__)
 # ------------------------
 CONFIG_FILE = app_dir() / "config.json"
 
+_DEFAULT_CONFIG = {
+    "ssi_username": "",
+    "ssi_password": "",
+    "font_path": "C:/Windows/Fonts/arial.ttf",
+    "output_dir": "overlays",
+    "output_width": 1920,
+    "last_match_url": "",
+    "window_geometry": None,
+    "debug_mode": False,
+    "colors": {
+        "A":       [50,  205,  50],
+        "C":       [255, 165,   0],
+        "D":       [255, 105, 180],
+        "M":       [220,  20,  60],
+        "NS":      [138,  43, 226],
+        "P":       [255, 215,   0],
+        "bg":      [40,   40,  40, 220],
+        "outline": [255, 255, 255, 255],
+    },
+}
+
+_first_run = False
 if not CONFIG_FILE.exists():
-    raise FileNotFoundError(
-        f"Missing config.json in the same directory as the script/exe ({CONFIG_FILE})"
-    )
+    _first_run = True
+    with open(CONFIG_FILE, "w", encoding="utf-8") as _f:
+        json.dump(_DEFAULT_CONFIG, _f, indent=2)
 
 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
     CONFIG = json.load(f)
@@ -73,15 +95,12 @@ def cfg_get(key, default=None):
 
 SSI_USERNAME = cfg_get("ssi_username")
 SSI_PASSWORD = cfg_get("ssi_password")
-FONT_PATH = resource_path(cfg_get("font_path", "DejaVuSans-Bold.ttf"))
+FONT_PATH = resource_path(cfg_get("font_path", "C:/Windows/Fonts/arial.ttf"))
 OUTPUT_DIR = Path(cfg_get("output_dir", "overlays"))
 OUTPUT_WIDTH = int(cfg_get("output_width", 1920))
 LAST_MATCH_URL = cfg_get("last_match_url", "")
 WINDOW_GEOMETRY = cfg_get("window_geometry", None)
 DEBUG_MODE = bool(cfg_get("debug_mode", False))
-
-if not SSI_USERNAME or not SSI_PASSWORD:
-    raise ValueError("Missing 'ssi_username'/'ssi_password' in config.json.")
 
 def save_config():
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -362,6 +381,10 @@ class ScoringApp(tk.Tk):
         self.session = None
         self.stages = []
 
+        # Show first-run welcome if config was just created
+        if _first_run:
+            self.after(200, self._show_first_run_welcome)
+
         # Top controls
         top = tk.Frame(self, bg="#1e1e1e")
         top.pack(fill="x", padx=8, pady=6)
@@ -442,10 +465,26 @@ class ScoringApp(tk.Tk):
                     if isinstance(child, tk.Button) and child["text"] == "Scrape":
                         child.configure(state=state)
 
+    def _show_first_run_welcome(self):
+        messagebox.showinfo(
+            "Welcome to SSI Scoring Overlay",
+            "A default config.json has been created next to the application.\n\n"
+            "Please open ⚙ Settings to enter your Shoot'n Score It username and password "
+            "before scraping.",
+        )
+        SettingsWindow(self)
+
     def on_scrape(self):
         url = self.match_var.get().strip()
         if not url:
             messagebox.showerror("Error", "Enter a match URL first.")
+            return
+        if not CONFIG.get("ssi_username") or not CONFIG.get("ssi_password"):
+            messagebox.showerror(
+                "Credentials missing",
+                "No username or password set.\n\nPlease open ⚙ Settings and enter your "
+                "Shoot'n Score It credentials before scraping.",
+            )
             return
 
         self._set_scrape_btn(False)
