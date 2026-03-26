@@ -1,12 +1,13 @@
 Hi there fellow competition shooter!
 
 ## Lastest updates
-Just completed version 2.5 of the software. Some new functionality was added and here's the changelog:
+New version 3.0! This is a major rewrite of the GUI so it's a more appealing for the user. No new functionality was added, the updates are to a very large extent under the hood. The output is identical to version 2.x. If you have any suggestions, please send them to me! :)
 
-### New features:
-* Add the option to edit the application config from within the application. If no config.json is present, create one using some defaults and prompts for login details for SSI
-* Make colors customizable
-* Add button to reset to defaults.
+### New:
+* UI rewrite. More modern looking UI.
+* Added colors on cells in the scrape results to match the overlay output.
+* Added scrapring status to toolbar.
+* Added Last scrape time to toolbar.
 
 #### Improvements:
 * Right after scraping, if no stage is selected when clicking "Preview Overlay" an error was displayed saying "Select a stage first". Now it previews the first/top stage automatically.
