@@ -405,14 +405,14 @@ class CanvasTable(tk.Frame):
         self._col_widths   = {}     # col_name -> pixel width
         self._edit_entry   = None
 
-        # Canvas + vertical scrollbar
-        self._vsb = tk.Scrollbar(self, orient="vertical", bg=C_SURFACE,
-                                  troughcolor=C_BG, width=12,
-                                  highlightthickness=0, bd=0)
+        # Canvas + vertical scrollbar (hidden until content exceeds visible height)
+        self._vsb = tk.Scrollbar(self, orient="vertical",
+                                  bg="#2a2a2a", troughcolor="#1a1a1a",
+                                  activebackground="#3a3a3a",
+                                  width=12, highlightthickness=0, bd=0)
         self._cv  = tk.Canvas(self, bg=C_BG, highlightthickness=0,
-                               yscrollcommand=self._vsb.set)
+                               yscrollcommand=self._update_scrollbar)
         self._vsb.config(command=self._cv.yview)
-        self._vsb.pack(side="right", fill="y")
         self._cv.pack(side="left", fill="both", expand=True)
 
         self._cv.bind("<Configure>",       self._on_resize)
@@ -423,6 +423,14 @@ class CanvasTable(tk.Frame):
         self._cv.bind("<MouseWheel>",      self._on_scroll)
 
     # ------------------------------------------------------------------
+    def _update_scrollbar(self, first, last):
+        """Show scrollbar only when content exceeds the visible area."""
+        if float(first) <= 0.0 and float(last) >= 1.0:
+            self._vsb.pack_forget()
+        else:
+            self._vsb.pack(side="right", fill="y", before=self._cv)
+        self._vsb.set(first, last)
+
     def load(self, stages):
         self._stages   = stages
         self._selected = None
@@ -767,16 +775,26 @@ class ScoringApp(tk.Tk):
         entry.select_range(0, "end")
         entry.focus()
 
+        _saved = [False]
+
         def save(event=None):
+            if _saved[0]:
+                return
+            _saved[0] = True
             new_val = entry.get()
             entry.destroy()
             self.table._edit_entry = None
             self.stages[row_idx][col_name] = new_val
             self.table.redraw()
 
+        def cancel(event=None):
+            _saved[0] = True
+            entry.destroy()
+            self.table._edit_entry = None
+
         entry.bind("<Return>",   save)
         entry.bind("<FocusOut>", save)
-        entry.bind("<Escape>",   lambda e: (entry.destroy(), setattr(self.table, "_edit_entry", None)))
+        entry.bind("<Escape>",   cancel)
 
     # ----------------------------------------------------------
     # All actions identical to v2.5
@@ -911,6 +929,15 @@ class PreviewWindow(tk.Toplevel):
         super().__init__(master)
         self.title("Overlay Preview")
         self.configure(bg=C_BG)
+        try:
+            import ctypes
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.FindWindowW(None, self.title())
+            if hwnd:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, 20, ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int(1)))
+        except Exception:
+            pass
         self.stages = stages
         self.index  = index
         self.img_tk = None
@@ -1002,7 +1029,17 @@ class SettingsWindow(tk.Toplevel):
         self.configure(bg="#111111")
         self.resizable(False, False)
         self.transient(master)
+        try:
+            import ctypes
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.FindWindowW(None, self.title())
+            if hwnd:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, 20, ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int(1)))
+        except Exception:
+            pass
         self.grab_set()
+        self.after(50, self.focus_set)
 
         self._vars           = {}
         self._show_pw        = {}
