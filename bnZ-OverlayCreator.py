@@ -370,6 +370,246 @@ def make_overlay(stage_info, font_path=FONT_PATH, outpath=None, output_width=Non
     return img
 
 
+
+# ============================================================
+# CANVAS TABLE  —  custom widget, full per-cell colour control
+# ============================================================
+
+class CanvasTable(tk.Frame):
+    """
+    A scrollable table drawn entirely on a tk.Canvas.
+    Supports per-cell text colour, hover highlight, left-border
+    selection accent, and double-click cell editing.
+    All rendering is explicit — no ttk, no hacks.
+    """
+
+    COLS = ("Stage", "Time", "HF", "Rounds", "A", "C", "D", "M", "P", "NS")
+    # Fractional widths — Stage is stretch, rest are fixed px set in _layout()
+    COL_FIXED = {
+        "Time": 74, "HF": 74, "Rounds": 60,
+        "A": 48, "C": 48, "D": 48, "M": 48, "P": 48, "NS": 48,
+    }
+    ROW_H      = 28
+    HEAD_H     = 26
+    ACCENT_W   = 3
+    FONT_HEAD  = ("Segoe UI", 8, "bold")
+    FONT_ROW   = ("Segoe UI", 10)
+    PAD_LEFT   = 10   # text left-pad inside Stage cell
+
+    def __init__(self, master, on_double_click=None, **kw):
+        super().__init__(master, bg=C_BG, **kw)
+        self._stages       = []
+        self._selected     = None   # row index
+        self._hovered      = None   # row index
+        self._on_dbl       = on_double_click
+        self._col_widths   = {}     # col_name -> pixel width
+        self._edit_entry   = None
+
+        # Canvas + vertical scrollbar
+        self._vsb = tk.Scrollbar(self, orient="vertical", bg=C_SURFACE,
+                                  troughcolor=C_BG, width=12,
+                                  highlightthickness=0, bd=0)
+        self._cv  = tk.Canvas(self, bg=C_BG, highlightthickness=0,
+                               yscrollcommand=self._vsb.set)
+        self._vsb.config(command=self._cv.yview)
+        self._vsb.pack(side="right", fill="y")
+        self._cv.pack(side="left", fill="both", expand=True)
+
+        self._cv.bind("<Configure>",       self._on_resize)
+        self._cv.bind("<Button-1>",        self._on_click)
+        self._cv.bind("<Double-Button-1>", self._on_double)
+        self._cv.bind("<Motion>",          self._on_motion)
+        self._cv.bind("<Leave>",           self._on_leave)
+        self._cv.bind("<MouseWheel>",      self._on_scroll)
+
+    # ------------------------------------------------------------------
+    def load(self, stages):
+        self._stages   = stages
+        self._selected = None
+        self._hovered  = None
+        self._layout(self._cv.winfo_width() or 800)
+        self.redraw()
+
+    def get_selected_index(self):
+        return self._selected
+
+    # ------------------------------------------------------------------
+    def _layout(self, total_w):
+        """Compute column pixel widths given the current canvas width."""
+        fixed_total = sum(self.COL_FIXED.values()) + self.ACCENT_W
+        stage_w     = max(120, total_w - fixed_total - 2)
+        self._col_widths = {"Stage": stage_w}
+        self._col_widths.update(self.COL_FIXED)
+
+    def _col_x(self, col_name):
+        """Return the left x-coordinate of a column."""
+        x = self.ACCENT_W
+        for c in self.COLS:
+            if c == col_name:
+                return x
+            x += self._col_widths.get(c, 0)
+        return x
+
+    def _row_y(self, row_idx):
+        """Return the top y-coordinate of a data row (0-based), after header."""
+        return self.HEAD_H + row_idx * self.ROW_H
+
+    def _row_at_y(self, y):
+        """Return data row index at canvas y, or None."""
+        if y < self.HEAD_H:
+            return None
+        idx = (y - self.HEAD_H) // self.ROW_H
+        if 0 <= idx < len(self._stages):
+            return idx
+        return None
+
+    def _col_at_x(self, x):
+        """Return column name at canvas x, or None."""
+        cx = self.ACCENT_W
+        for c in self.COLS:
+            w = self._col_widths.get(c, 0)
+            if cx <= x < cx + w:
+                return c
+            cx += w
+        return None
+
+    # ------------------------------------------------------------------
+    def redraw(self):
+        cv = self._cv
+        cv.delete("all")
+
+        total_w = cv.winfo_width() or 800
+        self._layout(total_w)
+
+        oc        = get_overlay_colors()
+        hit_hex   = {k: _rgb_to_hex(oc[k]) for k in ("A","C","D","M","P","NS")}
+        total_h   = self.HEAD_H + len(self._stages) * self.ROW_H
+
+        cv.config(scrollregion=(0, 0, total_w, max(total_h, cv.winfo_height() or 600)))
+
+        # ── Header ──
+        cv.create_rectangle(0, 0, total_w, self.HEAD_H,
+                            fill=C_SURFACE, outline="")
+        cv.create_line(0, self.HEAD_H, total_w, self.HEAD_H,
+                       fill=C_BORDER, width=1)
+
+        for col in self.COLS:
+            x = self._col_x(col)
+            w = self._col_widths.get(col, 0)
+            anchor = "w" if col == "Stage" else "center"
+            tx     = (x + self.PAD_LEFT) if col == "Stage" else (x + w // 2)
+            cv.create_text(tx, self.HEAD_H // 2,
+                           text=col.upper(), fill=C_TEXT_HINT,
+                           font=self.FONT_HEAD, anchor=anchor)
+
+        # ── Rows ──
+        for i, s in enumerate(self._stages):
+            ry     = self._row_y(i)
+            is_sel = (i == self._selected)
+            is_hov = (i == self._hovered)
+
+            if is_sel:
+                row_bg = C_ROW_SEL
+            elif is_hov:
+                row_bg = C_ROW_HOVER
+            else:
+                row_bg = C_ROW_EVEN if i % 2 == 0 else C_ROW_ODD
+
+            # Row background
+            cv.create_rectangle(self.ACCENT_W, ry, total_w, ry + self.ROW_H,
+                                fill=row_bg, outline="")
+
+            # Separator line
+            cv.create_line(self.ACCENT_W, ry + self.ROW_H - 1,
+                           total_w, ry + self.ROW_H - 1,
+                           fill=C_BORDER, width=1)
+
+            # Left accent bar
+            if is_sel:
+                cv.create_rectangle(0, ry, self.ACCENT_W, ry + self.ROW_H,
+                                    fill=C_ACCENT, outline="")
+            elif is_hov:
+                cv.create_rectangle(0, ry, self.ACCENT_W, ry + self.ROW_H,
+                                    fill="#3b5fc0", outline="")
+            else:
+                cv.create_rectangle(0, ry, self.ACCENT_W, ry + self.ROW_H,
+                                    fill=row_bg, outline="")
+
+            ty = ry + self.ROW_H // 2   # text vertical centre
+
+            # Stage — left-aligned
+            x = self._col_x("Stage")
+            w = self._col_widths["Stage"]
+            stage_txt = str(s.get("Stage", ""))
+            cv.create_text(x + self.PAD_LEFT, ty, text=stage_txt,
+                           fill=C_TEXT, font=self.FONT_ROW,
+                           anchor="w", width=w - self.PAD_LEFT - 4)
+
+            # Time — dim
+            self._draw_cell(cv, "Time", ty,
+                f"{s.get('Time',0):.2f}" if isinstance(s.get('Time',0),(int,float)) else str(s.get('Time','')),
+                C_TEXT_DIM)
+
+            # HF — blue accent
+            self._draw_cell(cv, "HF", ty,
+                f"{s.get('HF',0):.2f}" if isinstance(s.get('HF',0),(int,float)) else str(s.get('HF','')),
+                C_HF)
+
+            # Rounds — dim
+            self._draw_cell(cv, "Rounds", ty, str(s.get("Rounds", "")), C_TEXT_DIM)
+
+            # Hit columns — use configured colour; dim if zero
+            for k in ("A", "C", "D", "M", "P", "NS"):
+                val  = s.get(k, 0)
+                fill = hit_hex[k] if int(val or 0) > 0 else C_TEXT_HINT
+                self._draw_cell(cv, k, ty, str(val), fill)
+
+        # Vertical column dividers (subtle)
+        for col in self.COLS[1:]:
+            x = self._col_x(col)
+            cv.create_line(x, 0, x, total_h, fill=C_BORDER, width=1)
+
+    def _draw_cell(self, cv, col, ty, text, fill):
+        x = self._col_x(col)
+        w = self._col_widths.get(col, 0)
+        cv.create_text(x + w // 2, ty, text=text, fill=fill,
+                       font=self.FONT_ROW, anchor="center")
+
+    # ------------------------------------------------------------------
+    def _on_resize(self, event):
+        self._layout(event.width)
+        self.redraw()
+
+    def _on_click(self, event):
+        y   = self._cv.canvasy(event.y)
+        idx = self._row_at_y(int(y))
+        if idx is not None:
+            self._selected = idx
+            self.redraw()
+
+    def _on_double(self, event):
+        y   = self._cv.canvasy(event.y)
+        idx = self._row_at_y(int(y))
+        col = self._col_at_x(event.x)
+        if idx is not None and col is not None and self._on_dbl:
+            self._on_dbl(idx, col)
+
+    def _on_motion(self, event):
+        y   = self._cv.canvasy(event.y)
+        idx = self._row_at_y(int(y))
+        if idx != self._hovered:
+            self._hovered = idx
+            self.redraw()
+
+    def _on_leave(self, event):
+        if self._hovered is not None:
+            self._hovered = None
+            self.redraw()
+
+    def _on_scroll(self, event):
+        self._cv.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+
 # ============================================================
 # GUI  —  v3.0 Direction C
 # ============================================================
@@ -394,10 +634,8 @@ class ScoringApp(tk.Tk):
         self.configure(bg=C_BG)
         self.geometry(WINDOW_GEOMETRY if WINDOW_GEOMETRY else "1200x680")
 
-        self.session = None
-        self.stages = []
-        self._hovered_row = None
-        self._last_scraped = None
+        self.session  = None
+        self.stages   = []
 
         if _first_run:
             self.after(200, self._show_first_run_welcome)
@@ -406,34 +644,33 @@ class ScoringApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     # ----------------------------------------------------------
-    # UI construction
-    # ----------------------------------------------------------
     def _build_ui(self):
-        # ── Header bar ──
+        # ── Header ──
         hdr = tk.Frame(self, bg=C_SURFACE, height=38)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
 
-        # Logo pill
-        logo = tk.Label(hdr, text="S", bg=C_ACCENT, fg="white",
-                        font=("Segoe UI", 11, "bold"), width=2,
-                        padx=4, pady=2)
-        logo.pack(side="left", padx=(10, 6), pady=6)
+        tk.Label(hdr, text="S", bg=C_ACCENT, fg="white",
+                 font=("Segoe UI", 11, "bold"),
+                 padx=6, pady=0).pack(side="left", padx=(10, 6), pady=6)
 
         tk.Label(hdr, text="SSI Scoring Overlay", bg=C_SURFACE,
                  fg=C_TEXT, font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 16))
 
-        # Separator line
         tk.Frame(hdr, bg=C_BORDER2, width=1).pack(side="left", fill="y", pady=6, padx=4)
 
-        # Right-side buttons (packed right-to-left so Scrape ends up rightmost)
-        self._scrape_btn = tk.Button(hdr, text="Scrape", command=self.on_scrape, **BTN_PRIMARY)
+        self._scrape_btn = tk.Button(hdr, text="Scrape",
+                                      command=self.on_scrape, **BTN_PRIMARY)
         self._scrape_btn.pack(side="right", padx=(4, 10), pady=6)
 
-        tk.Button(hdr, text="⚙ Settings", command=self.on_settings, **BTN_STYLE).pack(side="right", padx=2, pady=6)
-        tk.Button(hdr, text="Export Overlays", command=self.on_export_overlays, **BTN_STYLE).pack(side="right", padx=2, pady=6)
-        tk.Button(hdr, text="Export CSV", command=self.on_export_csv, **BTN_STYLE).pack(side="right", padx=2, pady=6)
-        tk.Button(hdr, text="Preview Overlay", command=self.on_preview, **BTN_STYLE).pack(side="right", padx=2, pady=6)
+        for text, cmd in (
+            ("⚙ Settings",    self.on_settings),
+            ("Export Overlays", self.on_export_overlays),
+            ("Export CSV",    self.on_export_csv),
+            ("Preview Overlay", self.on_preview),
+        ):
+            tk.Button(hdr, text=text, command=cmd, **BTN_STYLE).pack(
+                side="right", padx=2, pady=6)
 
         # ── URL bar ──
         url_bar = tk.Frame(self, bg=C_PANEL, height=34)
@@ -441,7 +678,8 @@ class ScoringApp(tk.Tk):
         url_bar.pack_propagate(False)
 
         tk.Label(url_bar, text="Match URL:", bg=C_PANEL,
-                 fg=C_TEXT_HINT, font=("Segoe UI", 9)).pack(side="left", padx=(12, 6), pady=7)
+                 fg=C_TEXT_HINT, font=("Segoe UI", 9)).pack(
+            side="left", padx=(12, 6), pady=7)
 
         self.match_var = tk.StringVar(value=LAST_MATCH_URL)
         url_entry = tk.Entry(url_bar, textvariable=self.match_var,
@@ -453,98 +691,29 @@ class ScoringApp(tk.Tk):
         url_entry.pack(side="left", fill="x", expand=True, pady=6, padx=(0, 10))
         url_entry.bind("<Return>", lambda e: self.on_scrape())
 
-        # ── Table ──
-        self._build_table()
+        # ── Canvas table ──
+        self.table = CanvasTable(self, on_double_click=self._on_edit_cell)
+        self.table.pack(fill="both", expand=True)
 
         # ── Status bar ──
-        self._build_statusbar()
-
-    def _build_table(self):
-        # Canvas-based table with hover + selection left-border accent.
-        # We embed a ttk.Treeview but paint the accent bar manually via tags
-        # and motion bindings.
-
-        style = ttk.Style(self)
-        style.theme_use("default")
-
-        style.configure("v3.Treeview",
-                        background=C_ROW_EVEN,
-                        fieldbackground=C_ROW_EVEN,
-                        foreground=C_TEXT,
-                        rowheight=28,
-                        font=("Segoe UI", 10),
-                        borderwidth=0,
-                        relief="flat")
-        style.configure("v3.Treeview.Heading",
-                        background=C_SURFACE,
-                        foreground=C_TEXT_HINT,
-                        font=("Segoe UI", 8, "bold"),
-                        relief="flat",
-                        borderwidth=0,
-                        padding=(6, 5))
-        style.map("v3.Treeview",
-                  background=[("selected", C_ROW_SEL)],
-                  foreground=[("selected", C_TEXT)])
-        style.layout("v3.Treeview", [("v3.Treeview.treearea", {"sticky": "nswe"})])
-
-        columns = ("Stage", "Time", "HF", "Rounds", "A", "C", "D", "M", "P", "NS")
-        self.tree = ttk.Treeview(self, columns=columns, show="headings",
-                                  style="v3.Treeview", selectmode="browse")
-
-        # Column widths and headings
-        self.tree.heading("Stage",  text="Stage",  anchor="w")
-        self.tree.heading("Time",   text="Time",   anchor="center")
-        self.tree.heading("HF",     text="HF",     anchor="center")
-        self.tree.heading("Rounds", text="Rounds", anchor="center")
-        for col in ("A", "C", "D", "M", "P", "NS"):
-            self.tree.heading(col, text=col, anchor="center")
-
-        self.tree.column("Stage",  anchor="w",      width=260, stretch=True)
-        self.tree.column("Time",   anchor="center", width=80,  stretch=False)
-        self.tree.column("HF",     anchor="center", width=80,  stretch=False)
-        self.tree.column("Rounds", anchor="center", width=65,  stretch=False)
-        for col in ("A", "C", "D", "M", "P", "NS"):
-            self.tree.column(col, anchor="center", width=52, stretch=False)
-
-        # Row colour tags — even/odd base, hover, HF colour applied via column tag trick
-        self.tree.tag_configure("even", background=C_ROW_EVEN, foreground=C_TEXT)
-        self.tree.tag_configure("odd",  background=C_ROW_ODD,  foreground=C_TEXT)
-        self.tree.tag_configure("hover", background=C_ROW_HOVER, foreground=C_TEXT)
-
-        self.tree.pack(fill="both", expand=True, padx=0, pady=0)
-
-        self.tree.bind("<Double-1>",   self.on_edit_cell)
-        self.tree.bind("<Motion>",     self._on_row_hover)
-        self.tree.bind("<Leave>",      self._on_row_leave)
-        self.tree.bind("<<TreeviewSelect>>", self._on_select)
-
-        # Accent border canvas — drawn over the left edge of the treeview
-        # We achieve the left-border effect by painting a thin rectangle
-        # in an overlay canvas that sits on top of the treeview's left edge.
-        self._accent_canvas = tk.Canvas(self, width=3, bg=C_BG,
-                                         highlightthickness=0, bd=0)
-        self._accent_canvas.place(in_=self.tree, x=0, y=0, relheight=1)
-        self._accent_rects = {}   # iid -> canvas rect id
-
-    def _build_statusbar(self):
         sb = tk.Frame(self, bg=C_SURFACE, height=24)
         sb.pack(fill="x", side="bottom")
         sb.pack_propagate(False)
 
         self._status_conn = tk.Label(sb, text="● not connected",
-                                     bg=C_SURFACE, fg="#444444",
-                                     font=("Segoe UI", 8))
+                                      bg=C_SURFACE, fg="#444444",
+                                      font=("Segoe UI", 8))
         self._status_conn.pack(side="left", padx=(12, 16), pady=4)
 
         tk.Frame(sb, bg=C_BORDER, width=1).pack(side="left", fill="y", pady=4)
 
-        self._status_time = tk.Label(sb, text="",
-                                     bg=C_SURFACE, fg=C_TEXT_HINT,
-                                     font=("Segoe UI", 8))
+        self._status_time = tk.Label(sb, text="", bg=C_SURFACE,
+                                      fg=C_TEXT_HINT, font=("Segoe UI", 8))
         self._status_time.pack(side="left", padx=12, pady=4)
 
-    def _set_status_connected(self, connected: bool):
-        if connected:
+    # ----------------------------------------------------------
+    def _set_status_connected(self, ok: bool):
+        if ok:
             self._status_conn.config(text="● connected", fg="#22c55e")
         else:
             self._status_conn.config(text="● not connected", fg="#444444")
@@ -553,177 +722,64 @@ class ScoringApp(tk.Tk):
         now = datetime.datetime.now().strftime("%H:%M")
         self._status_time.config(text=f"Last scraped {now}")
 
-    # ----------------------------------------------------------
-    # Hover / selection accent
-    # ----------------------------------------------------------
-    def _on_row_hover(self, event):
-        row_id = self.tree.identify_row(event.y)
-        if row_id == self._hovered_row:
-            return
-        # Restore previous hovered row
-        if self._hovered_row and self._hovered_row in self.tree.get_children():
-            sel = self.tree.selection()
-            if self._hovered_row not in sel:
-                idx = self.tree.index(self._hovered_row)
-                tag = "even" if idx % 2 == 0 else "odd"
-                self.tree.item(self._hovered_row, tags=(tag,))
-        self._hovered_row = row_id
-        if row_id:
-            sel = self.tree.selection()
-            if row_id not in sel:
-                self.tree.item(row_id, tags=("hover",))
-        self._repaint_accent()
-
-    def _on_row_leave(self, event):
-        if self._hovered_row and self._hovered_row in self.tree.get_children():
-            sel = self.tree.selection()
-            if self._hovered_row not in sel:
-                idx = self.tree.index(self._hovered_row)
-                tag = "even" if idx % 2 == 0 else "odd"
-                self.tree.item(self._hovered_row, tags=(tag,))
-        self._hovered_row = None
-        self._repaint_accent()
-
-    def _on_select(self, event):
-        self._repaint_accent()
-
-    def _repaint_accent(self):
-        """Draw a 3px blue left border on the selected row (and dim one on hovered)."""
-        self._accent_canvas.delete("all")
-        row_h = 28  # must match rowheight in style
-        sel = self.tree.selection()
-
-        # Walk visible rows
-        for iid in self.tree.get_children():
-            bbox = self.tree.bbox(iid)
-            if not bbox:
-                continue
-            _, y, _, h = bbox
-            if iid in sel:
-                self._accent_canvas.create_rectangle(0, y, 3, y + h,
-                                                      fill=C_ACCENT, outline="")
-            elif iid == self._hovered_row:
-                self._accent_canvas.create_rectangle(0, y, 3, y + h,
-                                                      fill="#3b5fc0", outline="")
-
-    # ----------------------------------------------------------
-    # Table population
-    # ----------------------------------------------------------
-    def _refresh_table(self):
-        self.tree.delete(*self.tree.get_children())
-        oc = get_overlay_colors()
-
-        # Build per-column tag colours using a tag per colour-key per row.
-        # tkinter Treeview doesn't support per-cell colours natively,
-        # so we use a canvas overlay for the accent and rely on tag foreground
-        # for the whole row. Instead we format coloured values with unicode
-        # colour indicators — actually the cleanest approach for Treeview is
-        # to just use row-level tags and accept whole-row colouring.
-        # For per-cell hit colour we implement a thin Canvas overlay approach:
-        # the Treeview renders text, and we let the row tags control row bg.
-        # Hit column text colours are achieved by appending colour info below.
-
-        for i, s in enumerate(self.stages):
-            vals = (
-                s.get("Stage", ""),
-                f"{s.get('Time', 0):.2f}" if isinstance(s.get("Time", 0), (int, float)) else s.get("Time", ""),
-                f"{s.get('HF', 0):.2f}"   if isinstance(s.get("HF",  0), (int, float)) else s.get("HF",  ""),
-                s.get("Rounds", ""),
-                s.get("A", 0), s.get("C", 0), s.get("D", 0),
-                s.get("M", 0), s.get("P", 0), s.get("NS", 0),
-            )
-            tag = "even" if i % 2 == 0 else "odd"
-            self.tree.insert("", "end", values=vals, tags=(tag,))
-
-        # Auto-size Stage column
-        import tkinter.font as tkfont
-        row_font     = tkfont.Font(family="Segoe UI", size=10)
-        heading_font = tkfont.Font(family="Segoe UI", size=8, weight="bold")
-        min_w = heading_font.measure("Stage") + 24
-        max_w = max(
-            (row_font.measure(str(s.get("Stage", ""))) for s in self.stages),
-            default=min_w,
-        )
-        self.tree.column("Stage", width=max(min_w, max_w + 28))
-
-        self._repaint_accent()
-
-        # ── Per-cell hit colour overlay ──
-        # Draw a transparent canvas on top of the treeview and paint
-        # coloured text over the hit columns after the tree renders.
-        self.after(50, self._paint_hit_colours)
-
-    def _paint_hit_colours(self):
-        """Overlay coloured text onto the hit-value cells using a Canvas."""
-        # We use a single persistent overlay canvas; recreate it each refresh.
-        if hasattr(self, "_hit_canvas"):
-            self._hit_canvas.destroy()
-
-        oc = get_overlay_colors()
-        hit_cols   = ("A", "C", "D", "M", "P", "NS")
-        hit_colors = {k: _rgb_to_hex(oc[k]) for k in hit_cols}
-        hf_color   = C_HF
-
-        cv = tk.Canvas(self.tree, bg="", highlightthickness=0, bd=0)
-        cv.place(x=0, y=0, relwidth=1, relheight=1)
-        cv.lower()   # below treeview selection highlight
-        self._hit_canvas = cv
-
-        row_h = 28
-        font  = ("Segoe UI", 10)
-
-        for iid in self.tree.get_children():
-            bbox = self.tree.bbox(iid)
-            if not bbox:
-                continue
-            _, row_y, _, _ = bbox
-            text_y = row_y + row_h // 2
-
-            # HF column
-            hf_bbox = self.tree.bbox(iid, column="HF")
-            if hf_bbox:
-                cx = hf_bbox[0] + hf_bbox[2] // 2
-                val = self.tree.set(iid, "HF")
-                cv.create_text(cx, text_y, text=val, fill=hf_color,
-                               font=font, anchor="center")
-
-            # Hit columns
-            for col in hit_cols:
-                cell_bbox = self.tree.bbox(iid, column=col)
-                if not cell_bbox:
-                    continue
-                cx   = cell_bbox[0] + cell_bbox[2] // 2
-                val  = self.tree.set(iid, col)
-                fill = hit_colors[col] if int(val or 0) > 0 else C_TEXT_HINT
-                cv.create_text(cx, text_y, text=val, fill=fill,
-                               font=font, anchor="center")
-
-        # Hide the treeview's own text for HF and hit columns by making it
-        # the same colour as the background (invisible) — we can't do this
-        # per-column easily in ttk, so we leave the treeview text as-is and
-        # raise our canvas above it to paint over it.
-        cv.lift()
-
-    # ----------------------------------------------------------
-    # Scrape button state
-    # ----------------------------------------------------------
     def _set_scrape_btn(self, enabled: bool):
         self._scrape_btn.configure(state="normal" if enabled else "disabled")
 
-    # ----------------------------------------------------------
-    # First-run
-    # ----------------------------------------------------------
     def _show_first_run_welcome(self):
         messagebox.showinfo(
             "Welcome to SSI Scoring Overlay",
             "A default config.json has been created next to the application.\n\n"
-            "Please open ⚙ Settings to enter your Shoot'n Score It username and password "
-            "before scraping.",
+            "Please open ⚙ Settings to enter your Shoot'n Score It username "
+            "and password before scraping.",
         )
         SettingsWindow(self)
 
     # ----------------------------------------------------------
-    # Actions — identical logic to v2.5
+    def _refresh_table(self):
+        self.table.load(self.stages)
+
+    def _on_edit_cell(self, row_idx, col_name):
+        """Called by CanvasTable on double-click. Opens an inline entry widget."""
+        if not self.stages or row_idx >= len(self.stages):
+            return
+
+        cv    = self.table._cv
+        x     = self.table._col_x(col_name)
+        w     = self.table._col_widths.get(col_name, 80)
+        ry    = self.table._row_y(row_idx)
+        # Convert canvas coords to widget coords (account for scroll)
+        wy    = ry - int(cv.canvasy(0))
+
+        if self.table._edit_entry:
+            self.table._edit_entry.destroy()
+
+        entry = tk.Entry(cv,
+                         bg="#181818", fg=C_TEXT,
+                         insertbackground=C_TEXT,
+                         relief="flat", font=("Segoe UI", 10),
+                         highlightbackground=C_ACCENT,
+                         highlightthickness=1)
+        entry.place(x=x, y=wy, width=w, height=CanvasTable.ROW_H)
+        self.table._edit_entry = entry
+
+        cur_val = str(self.stages[row_idx].get(col_name, ""))
+        entry.insert(0, cur_val)
+        entry.select_range(0, "end")
+        entry.focus()
+
+        def save(event=None):
+            new_val = entry.get()
+            entry.destroy()
+            self.table._edit_entry = None
+            self.stages[row_idx][col_name] = new_val
+            self.table.redraw()
+
+        entry.bind("<Return>",   save)
+        entry.bind("<FocusOut>", save)
+        entry.bind("<Escape>",   lambda e: (entry.destroy(), setattr(self.table, "_edit_entry", None)))
+
+    # ----------------------------------------------------------
+    # All actions identical to v2.5
     # ----------------------------------------------------------
     def on_scrape(self):
         url = self.match_var.get().strip()
@@ -733,8 +789,8 @@ class ScoringApp(tk.Tk):
         if not CONFIG.get("ssi_username") or not CONFIG.get("ssi_password"):
             messagebox.showerror(
                 "Credentials missing",
-                "No username or password set.\n\nPlease open ⚙ Settings and enter your "
-                "Shoot'n Score It credentials before scraping.",
+                "No username or password set.\n\nPlease open ⚙ Settings and enter "
+                "your Shoot'n Score It credentials before scraping.",
             )
             return
 
@@ -743,19 +799,15 @@ class ScoringApp(tk.Tk):
 
         def _run():
             try:
-                stages = []
+                stages     = []
                 debug_file = "debug_rows.csv"
 
                 if DEBUG_MODE and os.path.exists(debug_file):
                     stages = scrape_scores_debug_from_csv(debug_file)
-                    if DEBUG_MODE:
-                        print("[DEBUG] Loaded stages from debug_rows.csv")
 
                 if not stages:
                     self.session = create_logged_in_session()
-                    stages = scrape_scores_live(self.session, url)
-                    if DEBUG_MODE:
-                        print("[INFO] Scraped stages online")
+                    stages       = scrape_scores_live(self.session, url)
 
                 stages = [normalize_stage(s) for s in stages]
 
@@ -776,7 +828,8 @@ class ScoringApp(tk.Tk):
                     self._set_scrape_btn(True)
                     if DEBUG_MODE:
                         src = "debug_rows.csv" if os.path.exists(debug_file) else "online"
-                        messagebox.showinfo("Success", f"DEBUG_MODE is ON — loaded {len(stages)} stages from {src}.")
+                        messagebox.showinfo("Success",
+                            f"DEBUG_MODE ON — {len(stages)} stages from {src}.")
 
                 self.after(0, _done)
 
@@ -784,21 +837,18 @@ class ScoringApp(tk.Tk):
                 import traceback
                 traceback.print_exc()
                 logger.error("Scraping failed: %s", e, exc_info=True)
-
                 err_str = str(e)
                 if "login" in err_str.lower() or "credential" in err_str.lower():
                     title = "Login failed"
-                    msg = (
-                        "Could not log in to Shoot'n Score It.\n\n"
-                        "Please check your username and password in ⚙ Settings and try again."
-                    )
+                    msg   = ("Could not log in to Shoot'n Score It.\n\n"
+                             "Please check your username and password in "
+                             "⚙ Settings and try again.")
                 else:
                     title = "Scraping failed"
-                    msg = (
-                        "Something went wrong while fetching scores.\n\n"
-                        "Check that the match URL is correct and that you have an internet connection.\n\n"
-                        f"Detail: {err_str}"
-                    )
+                    msg   = ("Something went wrong while fetching scores.\n\n"
+                             "Check that the match URL is correct and that you "
+                             "have an internet connection.\n\n"
+                             f"Detail: {err_str}")
 
                 def _show_error(t=title, m=msg):
                     messagebox.showerror(t, m)
@@ -808,59 +858,19 @@ class ScoringApp(tk.Tk):
 
         threading.Thread(target=_run, daemon=True).start()
 
-    def on_edit_cell(self, event):
-        row_id = self.tree.identify_row(event.y)
-        col_id = self.tree.identify_column(event.x)
-        if not row_id or not col_id:
-            return
-        col_index = int(col_id.replace("#", "")) - 1
-        col_name  = self.tree["columns"][col_index]
-
-        bbox = self.tree.bbox(row_id, column=col_id)
-        if not bbox:
-            return
-        x, y, width, height = bbox
-
-        # Styled to match new UI
-        entry = tk.Entry(self.tree,
-                         bg="#181818", fg=C_TEXT,
-                         insertbackground=C_TEXT,
-                         relief="flat",
-                         font=("Segoe UI", 10),
-                         highlightbackground=C_ACCENT,
-                         highlightthickness=1)
-        entry.place(x=x, y=y, width=width, height=height)
-
-        cur_val = self.tree.set(row_id, col_name)
-        entry.insert(0, cur_val)
-        entry.select_range(0, "end")
-        entry.focus()
-
-        def save_edit(event=None):
-            new_val = entry.get()
-            self.tree.set(row_id, col_name, new_val)
-            entry.destroy()
-            idx = self.tree.index(row_id)
-            self.stages[idx][col_name] = new_val
-            self.after(50, self._paint_hit_colours)
-
-        entry.bind("<Return>",   save_edit)
-        entry.bind("<FocusOut>", save_edit)
-        entry.bind("<Escape>",   lambda e: entry.destroy())
-
     def on_preview(self):
         if not self.stages:
             messagebox.showwarning("No data", "Scrape first.")
             return
-        sel = self.tree.selection()
-        idx = self.tree.index(sel[0]) if sel else 0
-        PreviewWindow(self, self.stages, idx)
+        idx = self.table.get_selected_index()
+        PreviewWindow(self, self.stages, idx if idx is not None else 0)
 
     def on_export_csv(self):
         if not self.stages:
             messagebox.showwarning("No data", "Scrape first.")
             return
-        path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv")])
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv", filetypes=[("CSV", "*.csv")])
         if not path:
             return
         cols = ("Stage", "Time", "HF", "Rounds", "A", "C", "D", "M", "NS", "P")
@@ -878,9 +888,8 @@ class ScoringApp(tk.Tk):
         outdir = OUTPUT_DIR
         outdir.mkdir(parents=True, exist_ok=True)
         for i, s in enumerate(self.stages, start=1):
-            safe_name = s.get("Stage", f"stage_{i}").replace(" ", "_").replace(".", "")
-            outpath = outdir / f"{safe_name}.png"
-            make_overlay(s, font_path=FONT_PATH, outpath=str(outpath))
+            safe = s.get("Stage", f"stage_{i}").replace(" ", "_").replace(".", "")
+            make_overlay(s, font_path=FONT_PATH, outpath=str(outdir / f"{safe}.png"))
         messagebox.showinfo("Export complete", f"Overlays saved to {outdir}")
 
     def on_settings(self):
@@ -894,7 +903,7 @@ class ScoringApp(tk.Tk):
 
 
 # ============================================================
-# PREVIEW WINDOW  —  v3.0
+# PREVIEW WINDOW
 # ============================================================
 
 class PreviewWindow(tk.Toplevel):
@@ -902,7 +911,6 @@ class PreviewWindow(tk.Toplevel):
         super().__init__(master)
         self.title("Overlay Preview")
         self.configure(bg=C_BG)
-
         self.stages = stages
         self.index  = index
         self.img_tk = None
@@ -912,48 +920,43 @@ class PreviewWindow(tk.Toplevel):
 
         btn_frame = tk.Frame(self, bg=C_BG)
         btn_frame.pack(pady=10)
-        tk.Button(btn_frame, text="◀ Previous", command=self.prev_stage,    **BTN_STYLE).pack(side="left", padx=6)
-        tk.Button(btn_frame, text="Next ▶",     command=self.next_stage,    **BTN_STYLE).pack(side="left", padx=6)
-        tk.Button(btn_frame, text="Save PNG",   command=self.save_current_png, **BTN_PRIMARY).pack(side="left", padx=6)
+        tk.Button(btn_frame, text="◀ Previous", command=self.prev_stage,
+                  **BTN_STYLE).pack(side="left", padx=6)
+        tk.Button(btn_frame, text="Next ▶",     command=self.next_stage,
+                  **BTN_STYLE).pack(side="left", padx=6)
+        tk.Button(btn_frame, text="Save PNG",   command=self.save_current_png,
+                  **BTN_PRIMARY).pack(side="left", padx=6)
 
         self.bind("<Left>",   lambda e: self.prev_stage())
         self.bind("<Right>",  lambda e: self.next_stage())
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("s",        lambda e: self.save_current_png())
         self.focus_set()
-
         self.show_stage()
 
     def _load_display_image(self):
-        pil_img = make_overlay(self.stages[self.index], font_path=FONT_PATH, outpath=None)
-        if pil_img.width > MAX_PREVIEW_WIDTH:
-            new_h = int(pil_img.height * MAX_PREVIEW_WIDTH / pil_img.width)
-            return pil_img.resize((MAX_PREVIEW_WIDTH, new_h), Image.LANCZOS)
-        return pil_img
+        img = make_overlay(self.stages[self.index], font_path=FONT_PATH)
+        if img.width > MAX_PREVIEW_WIDTH:
+            h = int(img.height * MAX_PREVIEW_WIDTH / img.width)
+            return img.resize((MAX_PREVIEW_WIDTH, h), Image.LANCZOS)
+        return img
 
     def show_stage(self):
-        display     = self._load_display_image()
-        self.img_tk = ImageTk.PhotoImage(display)
-        img_w, img_h = display.size
-
-        self.canvas.config(width=img_w, height=img_h)
+        display      = self._load_display_image()
+        self.img_tk  = ImageTk.PhotoImage(display)
+        iw, ih       = display.size
+        self.canvas.config(width=iw, height=ih)
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, image=self.img_tk, anchor="nw")
-
-        geom_w = max(img_w + 40, 500)
-        geom_h = img_h + PREVIEW_BTN_EXTRA_HEIGHT
-        self.geometry(f"{geom_w}x{geom_h}")
-
-        s = self.stages[self.index]
-        self.title(f"Overlay Preview — {s.get('Stage', '')}")
+        self.geometry(f"{max(iw+40,500)}x{ih+PREVIEW_BTN_EXTRA_HEIGHT}")
+        self.title(f"Overlay Preview — {self.stages[self.index].get('Stage','')}")
 
     def save_current_png(self):
-        s         = self.stages[self.index]
-        safe_name = s.get("Stage", f"stage_{self.index}").replace(" ", "_").replace(".", "")
-        path      = filedialog.asksaveasfilename(
-            defaultextension=".png", initialfile=f"{safe_name}.png",
-            filetypes=[("PNG files", "*.png")]
-        )
+        s    = self.stages[self.index]
+        name = s.get("Stage", f"stage_{self.index}").replace(" ","_").replace(".","")
+        path = filedialog.asksaveasfilename(
+            defaultextension=".png", initialfile=f"{name}.png",
+            filetypes=[("PNG files", "*.png")])
         if not path:
             return
         make_overlay(s, font_path=FONT_PATH, outpath=path)
@@ -971,7 +974,7 @@ class PreviewWindow(tk.Toplevel):
 
 
 # ============================================================
-# SETTINGS WINDOW  —  v3.0
+# SETTINGS WINDOW
 # ============================================================
 
 class SettingsWindow(tk.Toplevel):
@@ -1001,21 +1004,21 @@ class SettingsWindow(tk.Toplevel):
         self.transient(master)
         self.grab_set()
 
-        self._vars         = {}
-        self._show_pw      = {}
-        self._color_values = {}
+        self._vars           = {}
+        self._show_pw        = {}
+        self._color_values   = {}
         self._color_swatches = {}
 
-        LABEL_W = 18
-        ENTRY_W = 46
+        LABEL_W  = 18
+        ENTRY_W  = 46
+        pad_x, pad_y = 16, 5
 
-        lbl_cfg = dict(bg="#111111", fg=C_TEXT, anchor="w",
-                       width=LABEL_W, font=("Segoe UI", 9))
+        lbl_cfg   = dict(bg="#111111", fg=C_TEXT, anchor="w",
+                         width=LABEL_W, font=("Segoe UI", 9))
         entry_cfg = dict(bg="#1a1a1a", fg=C_TEXT_DIM,
                          insertbackground=C_TEXT_DIM,
                          relief="flat", font=("Segoe UI", 9), width=ENTRY_W,
                          highlightbackground=C_BORDER2, highlightthickness=1)
-        pad_x, pad_y = 16, 5
 
         for row_i, (key, label, ftype) in enumerate(self._FIELDS):
             current = CONFIG.get(key, "")
@@ -1029,7 +1032,8 @@ class SettingsWindow(tk.Toplevel):
                                bg="#111111", fg=C_TEXT,
                                activebackground="#111111", activeforeground=C_TEXT,
                                selectcolor="#1a1a1a", relief="flat"
-                               ).grid(row=row_i, column=1, padx=(0, pad_x), pady=pad_y, sticky="w")
+                               ).grid(row=row_i, column=1, padx=(0, pad_x),
+                                      pady=pad_y, sticky="w")
 
             elif ftype == "password":
                 var = tk.StringVar(value=str(current))
@@ -1056,18 +1060,17 @@ class SettingsWindow(tk.Toplevel):
                 def _make_browse(v=var, k=key):
                     def _browse():
                         if k == "font_path":
-                            result = filedialog.askopenfilename(
+                            r = filedialog.askopenfilename(
                                 title="Select font file",
-                                filetypes=[("Font files", "*.ttf *.otf"), ("All files", "*.*")],
-                                initialfile=v.get() or "",
-                            )
+                                filetypes=[("Font files", "*.ttf *.otf"),
+                                           ("All files", "*.*")],
+                                initialfile=v.get() or "")
                         else:
-                            result = filedialog.askdirectory(
+                            r = filedialog.askdirectory(
                                 title="Select output directory",
-                                initialdir=v.get() or ".",
-                            )
-                        if result:
-                            v.set(result)
+                                initialdir=v.get() or ".")
+                        if r:
+                            v.set(r)
                     return _browse
 
                 tk.Button(frame, text="Browse…", command=_make_browse(),
@@ -1080,60 +1083,57 @@ class SettingsWindow(tk.Toplevel):
                     row=row_i, column=1, padx=(0, pad_x), pady=pad_y, sticky="w")
 
         # Color section
-        fields_count  = len(self._FIELDS)
-        color_sep_row = fields_count
+        fc  = len(self._FIELDS)
+        csr = fc
 
         ttk.Separator(self, orient="horizontal").grid(
-            row=color_sep_row, column=0, columnspan=2,
+            row=csr, column=0, columnspan=2,
             sticky="ew", padx=pad_x, pady=(10, 4))
         tk.Label(self, text="Overlay Colors", bg="#111111", fg="white",
                  font=("Segoe UI", 9, "bold")).grid(
-            row=color_sep_row + 1, column=0, columnspan=2,
+            row=csr + 1, column=0, columnspan=2,
             padx=pad_x, pady=(2, 4), sticky="w")
 
-        current_colors = get_overlay_colors()
+        cc = get_overlay_colors()
         for i, (ckey, clabel) in enumerate(self._COLOR_LABELS):
-            row  = color_sep_row + 2 + i
-            rgba = current_colors[ckey]
+            row  = csr + 2 + i
+            rgba = cc[ckey]
             self._color_values[ckey] = list(rgba)
-
             tk.Label(self, text=clabel + ":", **lbl_cfg).grid(
                 row=row, column=0, padx=(pad_x, 8), pady=(2, 2), sticky="w")
-
-            frame   = tk.Frame(self, bg="#111111")
+            frame = tk.Frame(self, bg="#111111")
             frame.grid(row=row, column=1, padx=(0, pad_x), pady=(2, 2), sticky="w")
-
-            hex_col = _rgb_to_hex(rgba)
-            swatch  = tk.Label(frame, bg=hex_col, width=4, relief="solid",
-                               borderwidth=1, cursor="hand2")
+            swatch = tk.Label(frame, bg=_rgb_to_hex(rgba), width=4,
+                              relief="solid", borderwidth=1, cursor="hand2")
             swatch.pack(side="left", ipady=5, padx=(0, 8))
             self._color_swatches[ckey] = swatch
             swatch.bind("<Button-1>", lambda e, k=ckey: self._pick_color(k))
-
             alpha_part = f", A:{rgba[3]}" if len(rgba) == 4 else ""
-            rgb_label  = tk.Label(frame,
-                                  text=f"R:{rgba[0]}  G:{rgba[1]}  B:{rgba[2]}{alpha_part}",
-                                  bg="#111111", fg="#888888",
-                                  font=("Segoe UI", 8), width=28, anchor="w")
-            rgb_label.pack(side="left")
-
-            tk.Button(frame, text="Change…", command=lambda k=ckey: self._pick_color(k),
+            rgb_lbl = tk.Label(frame,
+                               text=f"R:{rgba[0]}  G:{rgba[1]}  B:{rgba[2]}{alpha_part}",
+                               bg="#111111", fg="#888888",
+                               font=("Segoe UI", 8), width=28, anchor="w")
+            rgb_lbl.pack(side="left")
+            tk.Button(frame, text="Change…",
+                      command=lambda k=ckey: self._pick_color(k),
                       **BTN_STYLE).pack(side="left")
 
-        reset_row = color_sep_row + 2 + len(self._COLOR_LABELS)
+        rr = csr + 2 + len(self._COLOR_LABELS)
         tk.Button(self, text="Reset colors to defaults",
                   command=self._reset_colors, **BTN_STYLE).grid(
-            row=reset_row, column=0, columnspan=2, pady=(6, 2))
+            row=rr, column=0, columnspan=2, pady=(6, 2))
 
-        sep_row = reset_row + 1
+        sr = rr + 1
         ttk.Separator(self, orient="horizontal").grid(
-            row=sep_row, column=0, columnspan=2,
+            row=sr, column=0, columnspan=2,
             sticky="ew", padx=pad_x, pady=(8, 4))
 
-        btn_frame = tk.Frame(self, bg="#111111")
-        btn_frame.grid(row=sep_row + 1, column=0, columnspan=2, pady=(4, 12))
-        tk.Button(btn_frame, text="Save",   width=10, command=self._save,    **BTN_PRIMARY).pack(side="left", padx=8)
-        tk.Button(btn_frame, text="Cancel", width=10, command=self.destroy,  **BTN_STYLE).pack(side="left", padx=8)
+        bf = tk.Frame(self, bg="#111111")
+        bf.grid(row=sr + 1, column=0, columnspan=2, pady=(4, 12))
+        tk.Button(bf, text="Save",   width=10,
+                  command=self._save,    **BTN_PRIMARY).pack(side="left", padx=8)
+        tk.Button(bf, text="Cancel", width=10,
+                  command=self.destroy, **BTN_STYLE).pack(side="left", padx=8)
 
         self.bind("<Escape>", lambda e: self.destroy())
 
@@ -1144,20 +1144,19 @@ class SettingsWindow(tk.Toplevel):
         self.geometry(f"+{mx - w // 2}+{my - h // 2}")
 
     def _pick_color(self, k):
-        current_rgb = self._color_values[k][:3]
-        init_hex    = _rgb_to_hex(self._color_values[k])
-        result      = colorchooser.askcolor(color=init_hex, title=f"Choose color — {k}", parent=self)
-        if not result or not result[0]:
+        init = _rgb_to_hex(self._color_values[k])
+        res  = colorchooser.askcolor(color=init,
+                                     title=f"Choose color — {k}", parent=self)
+        if not res or not res[0]:
             return
-        r, g, b = (int(x) for x in result[0])
+        r, g, b = (int(x) for x in res[0])
         alpha   = self._color_values[k][3] if len(self._color_values[k]) == 4 else None
         self._color_values[k] = [r, g, b] + ([alpha] if alpha is not None else [])
-        sw = self._color_swatches[k]
-        sw.config(bg="#{:02x}{:02x}{:02x}".format(r, g, b))
+        self._color_swatches[k].config(bg="#{:02x}{:02x}{:02x}".format(r, g, b))
         alpha_part = f", A:{alpha}" if alpha is not None else ""
-        for widget in sw.master.winfo_children():
-            if isinstance(widget, tk.Label) and widget is not sw:
-                widget.config(text=f"R:{r}  G:{g}  B:{b}{alpha_part}")
+        for w in self._color_swatches[k].master.winfo_children():
+            if isinstance(w, tk.Label) and w is not self._color_swatches[k]:
+                w.config(text=f"R:{r}  G:{g}  B:{b}{alpha_part}")
                 break
 
     def _reset_colors(self):
@@ -1166,20 +1165,18 @@ class SettingsWindow(tk.Toplevel):
             r, g, b = default[0], default[1], default[2]
             alpha   = default[3] if len(default) == 4 else None
             if ckey in self._color_swatches:
-                self._color_swatches[ckey].config(bg="#{:02x}{:02x}{:02x}".format(r, g, b))
-            for widget in self._color_swatches[ckey].master.winfo_children():
-                if isinstance(widget, tk.Label) and widget is not self._color_swatches[ckey]:
+                self._color_swatches[ckey].config(
+                    bg="#{:02x}{:02x}{:02x}".format(r, g, b))
+            for w in self._color_swatches[ckey].master.winfo_children():
+                if isinstance(w, tk.Label) and w is not self._color_swatches[ckey]:
                     alpha_part = f", A:{alpha}" if alpha is not None else ""
-                    widget.config(text=f"R:{r}  G:{g}  B:{b}{alpha_part}")
+                    w.config(text=f"R:{r}  G:{g}  B:{b}{alpha_part}")
                     break
 
     def _save(self):
         for key, var in self._vars.items():
-            value = var.get()
-            if isinstance(var, tk.BooleanVar):
-                CONFIG[key] = bool(value)
-            else:
-                CONFIG[key] = str(value).strip()
+            val = var.get()
+            CONFIG[key] = bool(val) if isinstance(var, tk.BooleanVar) else str(val).strip()
         CONFIG["colors"] = {k: v for k, v in self._color_values.items()}
         save_config()
         messagebox.showinfo(
