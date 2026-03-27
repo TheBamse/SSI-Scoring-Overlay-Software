@@ -2,17 +2,40 @@
 """
 bnZ-OverlayCreator.py  —  v3.0
 
-UI revamp (Direction C):
-- Windows-native chrome: flat titlebar, Segoe UI throughout, square corners
-- Compact header bar: logo, app title, all action buttons right-aligned
-- URL bar with labelled input field
-- Table: coloured hit values (A/C/D/M/P/NS use configured overlay colours)
-- HF column highlighted in blue as primary performance number
-- Left-border accent on selected row; hover highlight
-- Status bar: connection status + last scraped time
-- Cell editor styled to match new UI (dark, borderless)
-- PreviewWindow and SettingsWindow updated to match new aesthetic
-- All v2.5 functionality preserved exactly
+UI revamp — Direction C (Windows-native dark theme):
+
+Architecture:
+  The ttk.Treeview is replaced entirely by CanvasTable, a custom widget
+  that draws all headers, rows, colours, and the selection accent bar
+  directly onto a tk.Canvas. This gives full per-cell colour control
+  without any platform-specific hacks.
+
+Visual changes vs v2.5:
+  - Compact header bar: logo pill, app title, all buttons right-aligned
+  - Scrape button is primary (blue); all others are ghost style
+  - URL bar sits below the header as its own row
+  - Hit columns (A/C/D/M/P/NS) rendered in their configured overlay colours
+  - HF column rendered in blue as the primary performance number
+  - Zero hit values dimmed to reduce visual noise
+  - Selected row: dark blue background + 3px blue left-border accent
+  - Hovered row: slightly lighter background + dim blue accent
+  - Status bar: connection indicator (grey/green dot) + last scraped time
+  - Cell editor: dark background, blue focus ring, pre-selects value
+  - PreviewWindow and SettingsWindow get matching dark title bars
+
+Bug fixes applied during v3.0 stabilisation:
+  - CanvasTable: custom Canvas scrollbar replaces tk.Scrollbar
+    (native scrollbar ignores colour options on Windows)
+  - Scrollbar hidden when content fits; shown and redrawn via <Configure>
+    binding so it never flashes the wrong colour on first render
+  - SettingsWindow: dark title bar via DwmSetWindowAttribute
+  - SettingsWindow: after(50, focus_set) so Escape works immediately
+    (grab_set() steals focus before the window is fully mapped)
+  - PreviewWindow: dark title bar via DwmSetWindowAttribute
+  - Cell editor: _commit_edit() called on any canvas click so clicking
+    outside a cell saves the value (FocusOut alone is unreliable on Canvas)
+  - Cell editor: _saved flag prevents double-fire when redraw() destroys
+    the entry and triggers a second FocusOut
 """
 
 from pathlib import Path
@@ -634,7 +657,14 @@ class CanvasTable(tk.Frame):
         self._layout(event.width)
         self.redraw()
 
+    def _commit_edit(self):
+        """Save and close any open cell editor, as if Enter was pressed."""
+        e = self._edit_entry
+        if e and e.winfo_exists():
+            e.event_generate("<Return>")
+
     def _on_click(self, event):
+        self._commit_edit()
         y   = self._cv.canvasy(event.y)
         idx = self._row_at_y(int(y))
         if idx is not None:
@@ -642,6 +672,7 @@ class CanvasTable(tk.Frame):
             self.redraw()
 
     def _on_double(self, event):
+        # Single-click already committed any open edit via _on_click
         y   = self._cv.canvasy(event.y)
         idx = self._row_at_y(int(y))
         col = self._col_at_x(event.x)
