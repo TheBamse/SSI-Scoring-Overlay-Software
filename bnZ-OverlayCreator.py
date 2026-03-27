@@ -405,15 +405,24 @@ class CanvasTable(tk.Frame):
         self._col_widths   = {}     # col_name -> pixel width
         self._edit_entry   = None
 
-        # Canvas + vertical scrollbar (hidden until content exceeds visible height)
-        self._vsb = tk.Scrollbar(self, orient="vertical",
-                                  bg="#2a2a2a", troughcolor="#1a1a1a",
-                                  activebackground="#3a3a3a",
-                                  width=12, highlightthickness=0, bd=0)
-        self._cv  = tk.Canvas(self, bg=C_BG, highlightthickness=0,
-                               yscrollcommand=self._update_scrollbar)
-        self._vsb.config(command=self._cv.yview)
+        # Canvas + custom Canvas-drawn scrollbar (native tk.Scrollbar
+        # ignores colour options on Windows; this gives full dark control)
+        self._sb_canvas = tk.Canvas(self, width=10, bg=C_BG,
+                                     highlightthickness=0, bd=0)
+        self._cv = tk.Canvas(self, bg=C_BG, highlightthickness=0,
+                              yscrollcommand=self._update_scrollbar)
         self._cv.pack(side="left", fill="both", expand=True)
+        # _sb_canvas packed on demand by _update_scrollbar
+
+        self._sb_dragging  = False
+        self._sb_drag_start_y = 0
+        self._sb_first     = 0.0
+        self._sb_last      = 1.0
+
+        self._sb_canvas.bind("<ButtonPress-1>",   self._sb_on_press)
+        self._sb_canvas.bind("<B1-Motion>",       self._sb_on_drag)
+        self._sb_canvas.bind("<ButtonRelease-1>", self._sb_on_release)
+        self._sb_canvas.bind("<Configure>",        lambda e: self._sb_draw())
 
         self._cv.bind("<Configure>",       self._on_resize)
         self._cv.bind("<Button-1>",        self._on_click)
@@ -424,12 +433,49 @@ class CanvasTable(tk.Frame):
 
     # ------------------------------------------------------------------
     def _update_scrollbar(self, first, last):
-        """Show scrollbar only when content exceeds the visible area."""
-        if float(first) <= 0.0 and float(last) >= 1.0:
-            self._vsb.pack_forget()
+        """Show/hide and redraw the custom Canvas scrollbar."""
+        self._sb_first = float(first)
+        self._sb_last  = float(last)
+        if self._sb_first <= 0.0 and self._sb_last >= 1.0:
+            self._sb_canvas.pack_forget()
         else:
-            self._vsb.pack(side="right", fill="y", before=self._cv)
-        self._vsb.set(first, last)
+            self._sb_canvas.pack(side="right", fill="y", before=self._cv)
+        self._sb_draw()
+
+    def _sb_draw(self):
+        """Paint the scrollbar track and thumb."""
+        sc  = self._sb_canvas
+        sc.delete("all")
+        w   = sc.winfo_width()  or 10
+        h   = sc.winfo_height() or 200
+        # Track
+        sc.create_rectangle(0, 0, w, h, fill="#1a1a1a", outline="")
+        # Thumb
+        ty1 = int(self._sb_first * h)
+        ty2 = int(self._sb_last  * h)
+        ty2 = max(ty2, ty1 + 20)   # minimum thumb height
+        fill = "#4a4a4a" if self._sb_dragging else "#3a3a3a"
+        sc.create_rectangle(2, ty1, w - 2, ty2, fill=fill,
+                            outline="", tags="thumb")
+
+    def _sb_on_press(self, event):
+        self._sb_dragging      = True
+        self._sb_drag_start_y  = event.y
+        self._sb_drag_start_top = self._sb_first
+        self._sb_draw()
+
+    def _sb_on_drag(self, event):
+        if not self._sb_dragging:
+            return
+        h     = self._sb_canvas.winfo_height() or 200
+        delta = (event.y - self._sb_drag_start_y) / h
+        new_top = max(0.0, min(self._sb_drag_start_top + delta,
+                               1.0 - (self._sb_last - self._sb_first)))
+        self._cv.yview_moveto(new_top)
+
+    def _sb_on_release(self, event):
+        self._sb_dragging = False
+        self._sb_draw()
 
     def load(self, stages):
         self._stages   = stages
