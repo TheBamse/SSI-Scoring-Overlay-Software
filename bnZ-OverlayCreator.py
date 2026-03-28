@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
+NOT WORKING, see errors when executing script
+
 bnZ-OverlayCreator.py  —  v3.0
 
-UI revamp — Direction C (Windows-native dark theme):
+UI revamp — Direction C + A/B mix (frameless, rounded, Windows):
 
 Architecture:
   The ttk.Treeview is replaced entirely by CanvasTable, a custom widget
@@ -22,6 +24,15 @@ Visual changes vs v2.5:
   - Status bar: connection indicator (grey/green dot) + last scraped time
   - Cell editor: dark background, blue focus ring, pre-selects value
   - PreviewWindow and SettingsWindow get matching dark title bars
+
+Frameless window (v3.5):
+  - overrideredirect(True) removes OS title bar entirely
+  - DWM DWMWA_WINDOW_CORNER_PREFERENCE = ROUND gives OS rounded corners on Win11
+  - Custom drag bar at top — click and drag anywhere on the bar to move window
+  - Edge/corner resize handles (6px border) for resizing without OS chrome
+  - Minimise via Win32 ShowWindow(SW_MINIMIZE); falls back to iconify()
+  - Quit button (red tint) replaces OS close button; saves config on exit
+  - Scrape is now first button (left); Quit is last (far right)
 
 Bug fixes applied during v3.0 stabilisation:
   - CanvasTable: custom Canvas scrollbar replaces tk.Scrollbar
@@ -699,63 +710,205 @@ class CanvasTable(tk.Frame):
 # GUI  —  v3.0 Direction C
 # ============================================================
 
-class ScoringApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
+class ScoringApp(tk.Toplevel):
+    """
+    The main application window.
 
-        # Dark title bar on Windows
-        try:
-            import ctypes
-            self.update_idletasks()
-            hwnd = ctypes.windll.user32.FindWindowW(None, self.title())
-            if hwnd:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, 20, ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int(1))
-                )
-        except Exception:
-            pass
+    Architecture note — taskbar + alt-tab:
+      overrideredirect(True) on tk.Tk() hides the window from the taskbar
+      and alt-tab entirely. The fix is to keep a tiny invisible tk.Tk() as
+      the process root (it holds the taskbar slot) and make the actual app
+      window a tk.Toplevel() with overrideredirect(True). The Toplevel is
+      transient to nothing — it floats freely — but the hidden root keeps
+      the app visible in the taskbar and alt-tab switcher.
+    """
+    _RESIZE_W = 6
 
-        self.title("SSI Scoring Overlay Software  —  v3.0")
+    def __init__(self, root):
+        super().__init__(root)
+        self._root = root   # keep reference to hidden tk.Tk()
+
+        self.title("SSI Scoring Overlay Software")
         self.configure(bg=C_BG)
         self.geometry(WINDOW_GEOMETRY if WINDOW_GEOMETRY else "1200x680")
+        self.minsize(900, 500)
 
-        self.session  = None
-        self.stages   = []
+        # Remove OS chrome — we draw our own drag bar
+        self.overrideredirect(True)
+
+        # Win10/11 rounded corners via DWM (applied after mapping)
+        self.bind("<Map>", self._apply_dwm)
+        self.after(100, self._apply_dwm)
+
+        # Internal drag / resize state
+        self._drag_x      = 0
+        self._drag_y      = 0
+        self._resizing    = None
+        self._resize_x    = 0
+        self._resize_y    = 0
+        self._resize_geom = (0, 0, 0, 0)
+
+        self.session = None
+        self.stages  = []
 
         if _first_run:
             self.after(200, self._show_first_run_welcome)
 
         self._build_ui()
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def _apply_dwm(self, event=None):
+        """Ask DWM for rounded corners and dark mode. Works on Win10 22H2+ and Win11."""
+        try:
+            import ctypes
+            # Use the HWND of this Toplevel directly
+            hwnd = self.winfo_id()
+            dwmapi = ctypes.windll.dwmapi
+            # Dark title bar (attribute 20) — even though we hide it,
+            # this makes the DWM frame dark so no white flash on resize
+            dwmapi.DwmSetWindowAttribute(
+                hwnd, 20,
+                ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int(1)))
+            # Rounded corners: DWMWCP_ROUND = 2
+            dwmapi.DwmSetWindowAttribute(
+                hwnd, 33,
+                ctypes.byref(ctypes.c_int(2)), ctypes.sizeof(ctypes.c_int(2)))
+        except Exception:
+            pass
+
+    # ----------------------------------------------------------
+    # Custom window dragging
+    # ----------------------------------------------------------
+    def _start_drag(self, event):
+        self._drag_x = event.x_root - self.winfo_x()
+        self._drag_y = event.y_root - self.winfo_y()
+
+    def _do_drag(self, event):
+        if self._resizing:
+            return
+        x = event.x_root - self._drag_x
+        y = event.y_root - self._drag_y
+        self.geometry(f"+{x}+{y}")
+
+    # ----------------------------------------------------------
+    # Edge resize
+    # ----------------------------------------------------------
+    def _bind_resize(self, widget):
+        widget.bind("<ButtonPress-1>",   self._resize_start)
+        widget.bind("<B1-Motion>",       self._resize_do)
+        widget.bind("<ButtonRelease-1>", self._resize_end)
+
+    def _resize_edge(self, ex, ey):
+        """Return edge/corner code for cursor position, or None."""
+        w  = self.winfo_width()
+        h  = self.winfo_height()
+        rw = self._RESIZE_W
+        # Map to window-local coords
+        lx = ex - self.winfo_rootx()
+        ly = ey - self.winfo_rooty()
+        left   = lx < rw
+        right  = lx > w - rw
+        top    = ly < rw
+        bottom = ly > h - rw
+        if bottom and right: return "se"
+        if bottom and left:  return "sw"
+        if top    and right: return "ne"
+        if top    and left:  return "nw"
+        if right:  return "e"
+        if left:   return "w"
+        if bottom: return "s"
+        if top:    return "n"
+        return None
+
+    def _resize_start(self, event):
+        edge = self._resize_edge(event.x_root, event.y_root)
+        if not edge:
+            return
+        self._resizing    = edge
+        self._resize_x    = event.x_root
+        self._resize_y    = event.y_root
+        self._resize_geom = (self.winfo_x(), self.winfo_y(),
+                             self.winfo_width(), self.winfo_height())
+
+    def _resize_do(self, event):
+        if not self._resizing:
+            return
+        dx   = event.x_root - self._resize_x
+        dy   = event.y_root - self._resize_y
+        ox, oy, ow, oh = self._resize_geom
+        e    = self._resizing
+        nx, ny, nw, nh = ox, oy, ow, oh
+        if "e" in e: nw = max(900, ow + dx)
+        if "s" in e: nh = max(500, oh + dy)
+        if "w" in e: nx = ox + dx; nw = max(900, ow - dx)
+        if "n" in e: ny = oy + dy; nh = max(500, oh - dy)
+        self.geometry(f"{nw}x{nh}+{nx}+{ny}")
+
+    def _resize_end(self, event):
+        self._resizing = None
 
     # ----------------------------------------------------------
     def _build_ui(self):
-        # ── Header ──
-        hdr = tk.Frame(self, bg=C_SURFACE, height=38)
-        hdr.pack(fill="x")
-        hdr.pack_propagate(False)
+        # Bind resize on the root window edges
+        self.bind("<ButtonPress-1>",   self._resize_start)
+        self.bind("<B1-Motion>",       self._resize_do)
+        self.bind("<ButtonRelease-1>", self._resize_end)
 
-        tk.Label(hdr, text="S", bg=C_ACCENT, fg="white",
-                 font=("Segoe UI", 11, "bold"),
-                 padx=6, pady=0).pack(side="left", padx=(10, 6), pady=6)
+        # ── Custom title / drag bar ──
+        drag = tk.Frame(self, bg=C_SURFACE, height=38)
+        drag.pack(fill="x")
+        drag.pack_propagate(False)
 
-        tk.Label(hdr, text="SSI Scoring Overlay", bg=C_SURFACE,
-                 fg=C_TEXT, font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 16))
+        # Bind dragging to the bar and all labels inside it
+        for w in (drag,):
+            w.bind("<ButtonPress-1>",   self._start_drag)
+            w.bind("<B1-Motion>",       self._do_drag)
 
-        tk.Frame(hdr, bg=C_BORDER2, width=1).pack(side="left", fill="y", pady=6, padx=4)
+        # Logo pill
+        logo = tk.Label(drag, text="S", bg=C_ACCENT, fg="white",
+                        font=("Segoe UI", 10, "bold"), padx=5)
+        logo.pack(side="left", padx=(10, 6), pady=7)
+        logo.bind("<ButtonPress-1>", self._start_drag)
+        logo.bind("<B1-Motion>",     self._do_drag)
 
-        self._scrape_btn = tk.Button(hdr, text="Scrape",
+        title_lbl = tk.Label(drag, text="SSI Scoring Overlay", bg=C_SURFACE,
+                             fg=C_TEXT, font=("Segoe UI", 10, "bold"))
+        title_lbl.pack(side="left", padx=(0, 12))
+        title_lbl.bind("<ButtonPress-1>", self._start_drag)
+        title_lbl.bind("<B1-Motion>",     self._do_drag)
+
+        # Separator
+        tk.Frame(drag, bg=C_BORDER2, width=1).pack(
+            side="left", fill="y", pady=8, padx=6)
+
+        # Action buttons — left to right: Scrape, Preview, Export CSV,
+        # Export Overlays, Settings. Quit at far right.
+        self._scrape_btn = tk.Button(drag, text="Scrape",
                                       command=self.on_scrape, **BTN_PRIMARY)
-        self._scrape_btn.pack(side="right", padx=(4, 10), pady=6)
+        self._scrape_btn.pack(side="left", padx=(0, 2), pady=6)
 
         for text, cmd in (
-            ("⚙ Settings",    self.on_settings),
-            ("Export Overlays", self.on_export_overlays),
-            ("Export CSV",    self.on_export_csv),
-            ("Preview Overlay", self.on_preview),
+            ("Preview Overlay",  self.on_preview),
+            ("Export CSV",       self.on_export_csv),
+            ("Export Overlays",  self.on_export_overlays),
+            ("⚙ Settings",       self.on_settings),
         ):
-            tk.Button(hdr, text=text, command=cmd, **BTN_STYLE).pack(
-                side="right", padx=2, pady=6)
+            tk.Button(drag, text=text, command=cmd, **BTN_STYLE).pack(
+                side="left", padx=2, pady=6)
+
+        # Separator before window controls
+        tk.Frame(drag, bg=C_BORDER2, width=1).pack(
+            side="right", fill="y", pady=8, padx=6)
+
+        # Quit button — far right, subtle red tint on hover via custom style
+        quit_style = dict(BTN_STYLE)
+        quit_style.update(bg="#2a1515", fg="#cc4444",
+                          activebackground="#3a1a1a", activeforeground="#ff6666")
+        tk.Button(drag, text="Quit", command=self.on_close,
+                  **quit_style).pack(side="right", padx=(2, 10), pady=6)
+
+        # Minimise button
+        tk.Button(drag, text="─", command=self._minimise,
+                  **BTN_STYLE).pack(side="right", padx=2, pady=6)
 
         # ── URL bar ──
         url_bar = tk.Frame(self, bg=C_PANEL, height=34)
@@ -795,6 +948,20 @@ class ScoringApp(tk.Tk):
         self._status_time = tk.Label(sb, text="", bg=C_SURFACE,
                                       fg=C_TEXT_HINT, font=("Segoe UI", 8))
         self._status_time.pack(side="left", padx=12, pady=4)
+
+    def _minimise(self):
+        """Minimise by withdrawing the app window and iconifying the hidden root.
+        This collapses the taskbar button correctly."""
+        self.withdraw()
+        self._root.iconify()
+        # Restore when the root is deiconified (user clicks taskbar)
+        self._root.bind("<Map>", self._on_restore)
+
+    def _on_restore(self, event=None):
+        self._root.unbind("<Map>")
+        self._root.withdraw()
+        self.deiconify()
+        self.lift()
 
     # ----------------------------------------------------------
     def _set_status_connected(self, ok: bool):
@@ -995,6 +1162,7 @@ class ScoringApp(tk.Tk):
         CONFIG["last_match_url"]  = self.match_var.get().strip()
         save_config()
         self.destroy()
+        self._root.destroy()   # also kill the hidden root so the process exits
 
 
 # ============================================================
@@ -1004,29 +1172,49 @@ class ScoringApp(tk.Tk):
 class PreviewWindow(tk.Toplevel):
     def __init__(self, master, stages, index):
         super().__init__(master)
-        self.title("Overlay Preview")
         self.configure(bg=C_BG)
-        try:
-            import ctypes
-            self.update_idletasks()
-            hwnd = ctypes.windll.user32.FindWindowW(None, self.title())
-            if hwnd:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, 20, ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int(1)))
-        except Exception:
-            pass
+        self.overrideredirect(True)
+        self.bind("<Map>", self._apply_dwm)
+        self.after(100, self._apply_dwm)
+
         self.stages = stages
         self.index  = index
         self.img_tk = None
+        self._drag_x = 0
+        self._drag_y = 0
 
+        # ── Custom drag bar ──
+        drag = tk.Frame(self, bg=C_SURFACE, height=34)
+        drag.pack(fill="x")
+        drag.pack_propagate(False)
+        for w in (drag,):
+            w.bind("<ButtonPress-1>", self._start_drag)
+            w.bind("<B1-Motion>",     self._do_drag)
+
+        title_lbl = tk.Label(drag, text="Overlay Preview", bg=C_SURFACE,
+                             fg=C_TEXT_DIM, font=("Segoe UI", 9))
+        title_lbl.pack(side="left", padx=12, pady=8)
+        title_lbl.bind("<ButtonPress-1>", self._start_drag)
+        title_lbl.bind("<B1-Motion>",     self._do_drag)
+
+        quit_style = dict(BTN_STYLE)
+        quit_style.update(bg="#2a1515", fg="#cc4444",
+                          activebackground="#3a1a1a", activeforeground="#ff6666")
+        tk.Button(drag, text="Close", command=self.destroy,
+                  **quit_style).pack(side="right", padx=(2, 8), pady=5)
+
+        # ── Image canvas ──
         self.canvas = tk.Canvas(self, bg=C_BG, highlightthickness=0)
-        self.canvas.pack(pady=(10, 0))
+        self.canvas.pack(pady=(8, 0))
 
+        # ── Button row: Prev | Next | Close | Save PNG ──
         btn_frame = tk.Frame(self, bg=C_BG)
         btn_frame.pack(pady=10)
         tk.Button(btn_frame, text="◀ Previous", command=self.prev_stage,
                   **BTN_STYLE).pack(side="left", padx=6)
         tk.Button(btn_frame, text="Next ▶",     command=self.next_stage,
+                  **BTN_STYLE).pack(side="left", padx=6)
+        tk.Button(btn_frame, text="Close",      command=self.destroy,
                   **BTN_STYLE).pack(side="left", padx=6)
         tk.Button(btn_frame, text="Save PNG",   command=self.save_current_png,
                   **BTN_PRIMARY).pack(side="left", padx=6)
@@ -1037,6 +1225,24 @@ class PreviewWindow(tk.Toplevel):
         self.bind("s",        lambda e: self.save_current_png())
         self.focus_set()
         self.show_stage()
+
+    def _apply_dwm(self, event=None):
+        try:
+            import ctypes
+            hwnd = self.winfo_id()
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 20, ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int(1)))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 33, ctypes.byref(ctypes.c_int(2)), ctypes.sizeof(ctypes.c_int(2)))
+        except Exception:
+            pass
+
+    def _start_drag(self, event):
+        self._drag_x = event.x_root - self.winfo_x()
+        self._drag_y = event.y_root - self.winfo_y()
+
+    def _do_drag(self, event):
+        self.geometry(f"+{event.x_root - self._drag_x}+{event.y_root - self._drag_y}")
 
     def _load_display_image(self):
         img = make_overlay(self.stages[self.index], font_path=FONT_PATH)
@@ -1102,21 +1308,35 @@ class SettingsWindow(tk.Toplevel):
 
     def __init__(self, master):
         super().__init__(master)
-        self.title("Settings")
         self.configure(bg="#111111")
         self.resizable(False, False)
         self.transient(master)
-        try:
-            import ctypes
-            self.update_idletasks()
-            hwnd = ctypes.windll.user32.FindWindowW(None, self.title())
-            if hwnd:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, 20, ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int(1)))
-        except Exception:
-            pass
+        self.overrideredirect(True)
+        self.bind("<Map>", self._apply_dwm)
+        self.after(100, self._apply_dwm)
         self.grab_set()
         self.after(50, self.focus_set)
+
+        self._drag_x = 0
+        self._drag_y = 0
+
+        # ── Frameless drag bar ──
+        drag = tk.Frame(self, bg="#0d0d0d", height=32)
+        drag.pack(fill="x")
+        drag.pack_propagate(False)
+        for w in (drag,):
+            w.bind("<ButtonPress-1>", self._start_drag)
+            w.bind("<B1-Motion>",     self._do_drag)
+        title_lbl = tk.Label(drag, text="Settings", bg="#0d0d0d",
+                             fg=C_TEXT_DIM, font=("Segoe UI", 9))
+        title_lbl.pack(side="left", padx=12, pady=8)
+        title_lbl.bind("<ButtonPress-1>", self._start_drag)
+        title_lbl.bind("<B1-Motion>",     self._do_drag)
+        quit_style = dict(BTN_STYLE)
+        quit_style.update(bg="#2a1515", fg="#cc4444",
+                          activebackground="#3a1a1a", activeforeground="#ff6666")
+        tk.Button(drag, text="✕", command=self.destroy,
+                  **quit_style).pack(side="right", padx=(2, 8), pady=5)
 
         self._vars           = {}
         self._show_pw        = {}
@@ -1257,6 +1477,24 @@ class SettingsWindow(tk.Toplevel):
         w, h = self.winfo_width(), self.winfo_height()
         self.geometry(f"+{mx - w // 2}+{my - h // 2}")
 
+    def _apply_dwm(self, event=None):
+        try:
+            import ctypes
+            hwnd = self.winfo_id()
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 20, ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int(1)))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 33, ctypes.byref(ctypes.c_int(2)), ctypes.sizeof(ctypes.c_int(2)))
+        except Exception:
+            pass
+
+    def _start_drag(self, event):
+        self._drag_x = event.x_root - self.winfo_x()
+        self._drag_y = event.y_root - self.winfo_y()
+
+    def _do_drag(self, event):
+        self.geometry(f"+{event.x_root - self._drag_x}+{event.y_root - self._drag_y}")
+
     def _pick_color(self, k):
         init = _rgb_to_hex(self._color_values[k])
         res  = colorchooser.askcolor(color=init,
@@ -1308,5 +1546,19 @@ class SettingsWindow(tk.Toplevel):
 # MAIN
 # ------------------------
 if __name__ == "__main__":
-    app = ScoringApp()
-    app.mainloop()
+    # Hidden root holds the taskbar entry and process lifecycle.
+    # The real window is a Toplevel with overrideredirect so it has no OS chrome
+    # but the app still appears in the taskbar and alt-tab switcher.
+    root = tk.Tk()
+    root.withdraw()                          # invisible — never shown
+    root.title("SSI Scoring Overlay Software")  # taskbar label
+    try:
+        import ctypes
+        # Give the hidden root a dark taskbar thumbnail
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            root.winfo_id(), 20,
+            ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int(1)))
+    except Exception:
+        pass
+    app = ScoringApp(root)
+    root.mainloop()
