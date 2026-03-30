@@ -2,14 +2,11 @@
 """
 
 TODO:
-* No rounded corners. Step away from frameless, suggested was to revisit that in a 4.0 and that is likely to lock it in a Win32 state. Not sure I want that.
-* Buttons need to be aligned to the right.
-* Scrape button back to right most position.
-
+* Still no dark themed title bars.
 
 bnZ-OverlayCreator.py  —  v3.0
 
-UI revamp — Direction C + A/B mix (frameless, rounded, Windows):
+UI revamp — Direction C (Windows dark theme):
 
 Architecture:
   The ttk.Treeview is replaced entirely by CanvasTable, a custom widget
@@ -29,15 +26,6 @@ Visual changes vs v2.5:
   - Status bar: connection indicator (grey/green dot) + last scraped time
   - Cell editor: dark background, blue focus ring, pre-selects value
   - PreviewWindow and SettingsWindow get matching dark title bars
-
-Frameless window (v3.5):
-  - overrideredirect(True) removes OS title bar entirely
-  - DWM DWMWA_WINDOW_CORNER_PREFERENCE = ROUND gives OS rounded corners on Win11
-  - Custom drag bar at top — click and drag anywhere on the bar to move window
-  - Edge/corner resize handles (6px border) for resizing without OS chrome
-  - Minimise via Win32 ShowWindow(SW_MINIMIZE); falls back to iconify()
-  - Quit button (red tint) replaces OS close button; saves config on exit
-  - Scrape is now first button (left); Quit is last (far right)
 
 Bug fixes applied during v3.0 stabilisation:
   - CanvasTable: custom Canvas scrollbar replaces tk.Scrollbar
@@ -712,46 +700,6 @@ class CanvasTable(tk.Frame):
 
 
 # ============================================================
-# DWM HELPER  —  dark title bar + rounded corners
-# ============================================================
-
-def _apply_dwm_style(winfo_id_func):
-    """
-    Apply dark title bar and rounded corners to a tkinter window on Windows.
-    winfo_id_func is the window's winfo_id method.
-
-    Uses GetAncestor(GA_ROOT=2) to walk from the Tk frame HWND up to the
-    actual top-level Win32 window — winfo_id() alone returns the embedded
-    Tk child frame, not the decoratable top-level window.
-    """
-    try:
-        import ctypes
-        import ctypes.wintypes
-
-        user32  = ctypes.windll.user32
-        dwmapi  = ctypes.windll.dwmapi
-
-        # GA_ROOT = 2: walk up to the root (top-level) window
-        hwnd = user32.GetAncestor(winfo_id_func(), 2)
-        if not hwnd:
-            hwnd = winfo_id_func()
-
-        # Attribute 20: DWMWA_USE_IMMERSIVE_DARK_MODE  (dark title bar)
-        dwmapi.DwmSetWindowAttribute(
-            hwnd, 20,
-            ctypes.byref(ctypes.c_int(1)),
-            ctypes.sizeof(ctypes.c_int(1)))
-
-        # Attribute 33: DWMWA_WINDOW_CORNER_PREFERENCE  (DWMWCP_ROUND = 2)
-        dwmapi.DwmSetWindowAttribute(
-            hwnd, 33,
-            ctypes.byref(ctypes.c_int(2)),
-            ctypes.sizeof(ctypes.c_int(2)))
-    except Exception:
-        pass   # non-Windows or older Windows — silently skip
-
-
-# ============================================================
 # GUI  —  v3.0 Direction C
 # ============================================================
 
@@ -766,9 +714,18 @@ class ScoringApp(tk.Tk):
         self.geometry(WINDOW_GEOMETRY if WINDOW_GEOMETRY else "1200x680")
         self.minsize(900, 500)
 
-        # Dark title bar + rounded corners via DWM
-        self.bind("<Map>", self._apply_dwm)
-        self.after(100, self._apply_dwm)
+        # Dark title bar — proven v2.5 approach using FindWindowW by title
+        try:
+            import ctypes
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.FindWindowW(None, self.title())
+            if hwnd:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, 20,
+                    ctypes.byref(ctypes.c_int(1)),
+                    ctypes.sizeof(ctypes.c_int(1)))
+        except Exception:
+            pass
 
         # Internal drag / resize state (kept for potential future use)
         self._drag_x      = 0
@@ -787,9 +744,6 @@ class ScoringApp(tk.Tk):
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    def _apply_dwm(self, event=None):
-        _apply_dwm_style(self.winfo_id)
-
     # ----------------------------------------------------------
     def _build_ui(self):
         # ── Header bar ──
@@ -806,22 +760,20 @@ class ScoringApp(tk.Tk):
                  fg=C_TEXT, font=("Segoe UI", 10, "bold")).pack(
             side="left", padx=(0, 12))
 
-        tk.Frame(hdr, bg=C_BORDER2, width=1).pack(
-            side="left", fill="y", pady=8, padx=6)
-
-        # Buttons left-to-right: Scrape | Preview | Export CSV | Export Overlays | Settings
-        self._scrape_btn = tk.Button(hdr, text="Scrape",
-                                      command=self.on_scrape, **BTN_PRIMARY)
-        self._scrape_btn.pack(side="left", padx=(0, 2), pady=6)
-
+        # Buttons right-aligned, packed right-to-left.
+        # Visual order left-to-right: Scrape | Preview | Export CSV | Export Overlays | Settings
         for text, cmd in (
-            ("Preview Overlay",  self.on_preview),
-            ("Export CSV",       self.on_export_csv),
-            ("Export Overlays",  self.on_export_overlays),
             ("⚙ Settings",       self.on_settings),
+            ("Export Overlays",  self.on_export_overlays),
+            ("Export CSV",       self.on_export_csv),
+            ("Preview Overlay",  self.on_preview),
         ):
             tk.Button(hdr, text=text, command=cmd, **BTN_STYLE).pack(
-                side="left", padx=2, pady=6)
+                side="right", padx=2, pady=6)
+
+        self._scrape_btn = tk.Button(hdr, text="Scrape",
+                                      command=self.on_scrape, **BTN_PRIMARY)
+        self._scrape_btn.pack(side="right", padx=(2, 4), pady=6)
 
         # ── URL bar ──
         url_bar = tk.Frame(self, bg=C_PANEL, height=34)
@@ -1072,9 +1024,17 @@ class PreviewWindow(tk.Toplevel):
         super().__init__(master)
         self.title("Overlay Preview")
         self.configure(bg=C_BG)
-        self.bind("<Map>", self._apply_dwm)
-        self.after(100, self._apply_dwm)
-
+        try:
+            import ctypes
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.FindWindowW(None, self.title())
+            if hwnd:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, 20,
+                    ctypes.byref(ctypes.c_int(1)),
+                    ctypes.sizeof(ctypes.c_int(1)))
+        except Exception:
+            pass
         self.stages = stages
         self.index  = index
         self.img_tk = None
@@ -1099,9 +1059,6 @@ class PreviewWindow(tk.Toplevel):
         self.bind("s",        lambda e: self.save_current_png())
         self.focus_set()
         self.show_stage()
-
-    def _apply_dwm(self, event=None):
-        _apply_dwm_style(self.winfo_id)
 
     def _load_display_image(self):
         img = make_overlay(self.stages[self.index], font_path=FONT_PATH)
@@ -1171,8 +1128,17 @@ class SettingsWindow(tk.Toplevel):
         self.configure(bg="#111111")
         self.resizable(False, False)
         self.transient(master)
-        self.bind("<Map>", self._apply_dwm)
-        self.after(100, self._apply_dwm)
+        try:
+            import ctypes
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.FindWindowW(None, self.title())
+            if hwnd:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, 20,
+                    ctypes.byref(ctypes.c_int(1)),
+                    ctypes.sizeof(ctypes.c_int(1)))
+        except Exception:
+            pass
         self.grab_set()
         self.after(50, self.focus_set)
 
@@ -1314,9 +1280,6 @@ class SettingsWindow(tk.Toplevel):
         my = master.winfo_y() + master.winfo_height() // 2
         w, h = self.winfo_width(), self.winfo_height()
         self.geometry(f"+{mx - w // 2}+{my - h // 2}")
-
-    def _apply_dwm(self, event=None):
-        _apply_dwm_style(self.winfo_id)
 
     def _pick_color(self, k):
         init = _rgb_to_hex(self._color_values[k])
