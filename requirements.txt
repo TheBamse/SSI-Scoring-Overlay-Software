@@ -1,3 +1,10 @@
+# SSI Scoring Overlay Software — Python dependencies
+#
+# Install with:  pip install -r requirements.txt
+#
+#
+# Application only verified with hhe latest stable of Python.
+# 
 requests
 bs4
 Pillow
