@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 """
-
-TODO:
-* Still no dark themed title bars.
-
 bnZ-OverlayCreator.py  —  v3.0
 
 UI revamp — Direction C (Windows dark theme):
@@ -26,6 +22,16 @@ Visual changes vs v2.5:
   - Status bar: connection indicator (grey/green dot) + last scraped time
   - Cell editor: dark background, blue focus ring, pre-selects value
   - PreviewWindow and SettingsWindow get matching dark title bars
+
+Known platform notes:
+  - Dark title bar: works on Windows 11. On Windows 10 the FindWindowW
+    approach is unreliable due to window handle timing differences between
+    tk.Tk() and the underlying Win32 window. Deferred to v4.0 where proper
+    Win32 subclassing will handle this correctly.
+  - Rounded corners: Windows 11 only via DWM attribute 33. Not supported
+    on Windows 10 regardless of build version. Deferred to v4.0.
+  - Resize: status bar must be packed before the table (side="bottom"
+    widgets must precede expand=True widgets in tkinter's pack manager).
 
 Bug fixes applied during v3.0 stabilisation:
   - CanvasTable: custom Canvas scrollbar replaces tk.Scrollbar
@@ -432,24 +438,46 @@ class CanvasTable(tk.Frame):
         self._col_widths   = {}     # col_name -> pixel width
         self._edit_entry   = None
 
-        # Canvas + custom Canvas-drawn scrollbar (native tk.Scrollbar
-        # ignores colour options on Windows; this gives full dark control)
+        # Custom Canvas-drawn vertical + horizontal scrollbars.
+        # Native tk.Scrollbar ignores colour options on Windows so we
+        # draw our own. Both are shown/hidden on demand.
+
+        # Vertical scrollbar (right edge)
         self._sb_canvas = tk.Canvas(self, width=10, bg=C_BG,
                                      highlightthickness=0, bd=0)
-        self._cv = tk.Canvas(self, bg=C_BG, highlightthickness=0,
-                              yscrollcommand=self._update_scrollbar)
-        self._cv.pack(side="left", fill="both", expand=True)
-        # _sb_canvas packed on demand by _update_scrollbar
+        # Horizontal scrollbar (bottom edge)
+        self._sb_h_canvas = tk.Canvas(self, height=10, bg=C_BG,
+                                       highlightthickness=0, bd=0)
 
-        self._sb_dragging  = False
-        self._sb_drag_start_y = 0
-        self._sb_first     = 0.0
-        self._sb_last      = 1.0
+        self._cv = tk.Canvas(self, bg=C_BG, highlightthickness=0,
+                              yscrollcommand=self._update_scrollbar_v,
+                              xscrollcommand=self._update_scrollbar_h)
+
+        # Pack order: h-bar at bottom, v-bar at right, canvas fills rest
+        # Both are packed on demand; only canvas always visible
+        self._cv.pack(side="left", fill="both", expand=True)
+
+        # Vertical scrollbar state
+        self._sb_dragging      = False
+        self._sb_drag_start_y  = 0
+        self._sb_first         = 0.0
+        self._sb_last          = 1.0
+
+        # Horizontal scrollbar state
+        self._sb_h_dragging     = False
+        self._sb_h_drag_start_x = 0
+        self._sb_h_first        = 0.0
+        self._sb_h_last         = 1.0
 
         self._sb_canvas.bind("<ButtonPress-1>",   self._sb_on_press)
         self._sb_canvas.bind("<B1-Motion>",       self._sb_on_drag)
         self._sb_canvas.bind("<ButtonRelease-1>", self._sb_on_release)
-        self._sb_canvas.bind("<Configure>",        lambda e: self._sb_draw())
+        self._sb_canvas.bind("<Configure>",       lambda e: self._sb_draw())
+
+        self._sb_h_canvas.bind("<ButtonPress-1>",   self._sb_h_on_press)
+        self._sb_h_canvas.bind("<B1-Motion>",       self._sb_h_on_drag)
+        self._sb_h_canvas.bind("<ButtonRelease-1>", self._sb_h_on_release)
+        self._sb_h_canvas.bind("<Configure>",       lambda e: self._sb_h_draw())
 
         self._cv.bind("<Configure>",       self._on_resize)
         self._cv.bind("<Button-1>",        self._on_click)
@@ -457,10 +485,12 @@ class CanvasTable(tk.Frame):
         self._cv.bind("<Motion>",          self._on_motion)
         self._cv.bind("<Leave>",           self._on_leave)
         self._cv.bind("<MouseWheel>",      self._on_scroll)
+        self._cv.bind("<Shift-MouseWheel>", self._on_scroll_h)
 
     # ------------------------------------------------------------------
-    def _update_scrollbar(self, first, last):
-        """Show/hide and redraw the custom Canvas scrollbar."""
+    # Vertical scrollbar
+    # ------------------------------------------------------------------
+    def _update_scrollbar_v(self, first, last):
         self._sb_first = float(first)
         self._sb_last  = float(last)
         if self._sb_first <= 0.0 and self._sb_last >= 1.0:
@@ -470,32 +500,27 @@ class CanvasTable(tk.Frame):
         self._sb_draw()
 
     def _sb_draw(self):
-        """Paint the scrollbar track and thumb."""
-        sc  = self._sb_canvas
+        sc = self._sb_canvas
         sc.delete("all")
-        w   = sc.winfo_width()  or 10
-        h   = sc.winfo_height() or 200
-        # Track
+        w  = sc.winfo_width()  or 10
+        h  = sc.winfo_height() or 200
         sc.create_rectangle(0, 0, w, h, fill="#1a1a1a", outline="")
-        # Thumb
-        ty1 = int(self._sb_first * h)
-        ty2 = int(self._sb_last  * h)
-        ty2 = max(ty2, ty1 + 20)   # minimum thumb height
+        ty1  = int(self._sb_first * h)
+        ty2  = max(int(self._sb_last * h), ty1 + 20)
         fill = "#4a4a4a" if self._sb_dragging else "#3a3a3a"
-        sc.create_rectangle(2, ty1, w - 2, ty2, fill=fill,
-                            outline="", tags="thumb")
+        sc.create_rectangle(2, ty1, w - 2, ty2, fill=fill, outline="")
 
     def _sb_on_press(self, event):
-        self._sb_dragging      = True
-        self._sb_drag_start_y  = event.y
+        self._sb_dragging       = True
+        self._sb_drag_start_y   = event.y
         self._sb_drag_start_top = self._sb_first
         self._sb_draw()
 
     def _sb_on_drag(self, event):
         if not self._sb_dragging:
             return
-        h     = self._sb_canvas.winfo_height() or 200
-        delta = (event.y - self._sb_drag_start_y) / h
+        h       = self._sb_canvas.winfo_height() or 200
+        delta   = (event.y - self._sb_drag_start_y) / h
         new_top = max(0.0, min(self._sb_drag_start_top + delta,
                                1.0 - (self._sb_last - self._sb_first)))
         self._cv.yview_moveto(new_top)
@@ -503,6 +528,48 @@ class CanvasTable(tk.Frame):
     def _sb_on_release(self, event):
         self._sb_dragging = False
         self._sb_draw()
+
+    # ------------------------------------------------------------------
+    # Horizontal scrollbar
+    # ------------------------------------------------------------------
+    def _update_scrollbar_h(self, first, last):
+        self._sb_h_first = float(first)
+        self._sb_h_last  = float(last)
+        if self._sb_h_first <= 0.0 and self._sb_h_last >= 1.0:
+            self._sb_h_canvas.pack_forget()
+        else:
+            self._sb_h_canvas.pack(side="bottom", fill="x", before=self._cv)
+        self._sb_h_draw()
+
+    def _sb_h_draw(self):
+        sc = self._sb_h_canvas
+        sc.delete("all")
+        w  = sc.winfo_width()  or 200
+        h  = sc.winfo_height() or 10
+        sc.create_rectangle(0, 0, w, h, fill="#1a1a1a", outline="")
+        tx1  = int(self._sb_h_first * w)
+        tx2  = max(int(self._sb_h_last * w), tx1 + 20)
+        fill = "#4a4a4a" if self._sb_h_dragging else "#3a3a3a"
+        sc.create_rectangle(tx1, 2, tx2, h - 2, fill=fill, outline="")
+
+    def _sb_h_on_press(self, event):
+        self._sb_h_dragging       = True
+        self._sb_h_drag_start_x   = event.x
+        self._sb_h_drag_start_left = self._sb_h_first
+        self._sb_h_draw()
+
+    def _sb_h_on_drag(self, event):
+        if not self._sb_h_dragging:
+            return
+        w        = self._sb_h_canvas.winfo_width() or 200
+        delta    = (event.x - self._sb_h_drag_start_x) / w
+        new_left = max(0.0, min(self._sb_h_drag_start_left + delta,
+                                1.0 - (self._sb_h_last - self._sb_h_first)))
+        self._cv.xview_moveto(new_left)
+
+    def _sb_h_on_release(self, event):
+        self._sb_h_dragging = False
+        self._sb_h_draw()
 
     def load(self, stages):
         self._stages   = stages
@@ -566,7 +633,10 @@ class CanvasTable(tk.Frame):
         hit_hex   = {k: _rgb_to_hex(oc[k]) for k in ("A","C","D","M","P","NS")}
         total_h   = self.HEAD_H + len(self._stages) * self.ROW_H
 
-        cv.config(scrollregion=(0, 0, total_w, max(total_h, cv.winfo_height() or 600)))
+        # Compute minimum content width from fixed columns + minimum Stage width
+        min_content_w = sum(self.COL_FIXED.values()) + self.ACCENT_W + 120
+        content_w     = max(total_w, min_content_w)
+        cv.config(scrollregion=(0, 0, content_w, max(total_h, cv.winfo_height() or 600)))
 
         # ── Header ──
         cv.create_rectangle(0, 0, total_w, self.HEAD_H,
@@ -698,6 +768,9 @@ class CanvasTable(tk.Frame):
     def _on_scroll(self, event):
         self._cv.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
+    def _on_scroll_h(self, event):
+        self._cv.xview_scroll(int(-1 * (event.delta / 120)), "units")
+
 
 # ============================================================
 # GUI  —  v3.0 Direction C
@@ -712,7 +785,6 @@ class ScoringApp(tk.Tk):
         self.title("SSI Scoring Overlay Software")
         self.configure(bg=C_BG)
         self.geometry(WINDOW_GEOMETRY if WINDOW_GEOMETRY else "1200x680")
-        self.minsize(900, 500)
 
         # Dark title bar — proven v2.5 approach using FindWindowW by title
         try:
@@ -794,11 +866,7 @@ class ScoringApp(tk.Tk):
         url_entry.pack(side="left", fill="x", expand=True, pady=6, padx=(0, 10))
         url_entry.bind("<Return>", lambda e: self.on_scrape())
 
-        # ── Canvas table ──
-        self.table = CanvasTable(self, on_double_click=self._on_edit_cell)
-        self.table.pack(fill="both", expand=True)
-
-        # ── Status bar ──
+        # ── Status bar — must be packed BEFORE the table so side="bottom" works ──
         sb = tk.Frame(self, bg=C_SURFACE, height=24)
         sb.pack(fill="x", side="bottom")
         sb.pack_propagate(False)
@@ -813,6 +881,10 @@ class ScoringApp(tk.Tk):
         self._status_time = tk.Label(sb, text="", bg=C_SURFACE,
                                       fg=C_TEXT_HINT, font=("Segoe UI", 8))
         self._status_time.pack(side="left", padx=12, pady=4)
+
+        # ── Canvas table — expand=True fills remaining space ──
+        self.table = CanvasTable(self, on_double_click=self._on_edit_cell)
+        self.table.pack(fill="both", expand=True)
 
     # ----------------------------------------------------------
     def _set_status_connected(self, ok: bool):
