@@ -22,15 +22,11 @@ jobs:
 
       - name: Build EXE
         run: |
-          pyinstaller --noconfirm --clean --onefile --noconsole --icon=icon.ico --name bnZ-OverlayCreator bnZ-OverlayCreator.py
-
-      - name: Zip EXE
-        run: |
-          Compress-Archive -Path dist\bnZ-OverlayCreator.exe -DestinationPath dist\bnZ-OverlayCreator.zip
+          pyinstaller --noconfirm --clean --onefile --noconsole --icon=icon.ico --name "SSI Scoring Overlay Software" bnZ-OverlayCreator.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bnZ-OverlayCreator
-          path: dist\bnZ-OverlayCreator.zip
+          name: SSI Scoring Overlay Software
+          path: dist\SSI Scoring Overlay Software.exe
           retention-days: 30
