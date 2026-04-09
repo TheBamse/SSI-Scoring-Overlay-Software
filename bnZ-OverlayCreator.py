@@ -172,7 +172,6 @@ def dark_dialog(parent, title, message, kind="info"):
     dlg.resizable(False, False)
     dlg.transient(parent)
     dlg.grab_set()
-    dlg.update_idletasks(); _dark_titlebar_toplevel(dlg)
     icon_map = {"info": ("ℹ", C_ACCENT), "error": ("✕", "#ef4444"), "warning": ("⚠", "#f59e0b")}
     icon_txt, icon_col = icon_map.get(kind, ("ℹ", C_ACCENT))
     top = tk.Frame(dlg, bg="#111111"); top.pack(padx=20, pady=(18, 8), fill="x")
@@ -189,7 +188,11 @@ def dark_dialog(parent, title, message, kind="info"):
     py = parent.winfo_y() + parent.winfo_height() // 2
     w, h = dlg.winfo_width(), dlg.winfo_height()
     dlg.geometry(f"+{px - w // 2}+{py - h // 2}")
-    dlg.focus_set()
+    def _fix_titlebar():
+        _dark_titlebar_toplevel(dlg)
+        dlg.withdraw(); dlg.deiconify()
+        dlg.focus_set()
+    dlg.after(10, _fix_titlebar)
     parent.wait_window(dlg)
 
 # ------------------------
@@ -685,7 +688,6 @@ class PreviewWindow(tk.Toplevel):
     def __init__(self, master, stages, index):
         super().__init__(master)
         self.title("Overlay Preview"); self.configure(bg=C_BG)
-        self.update_idletasks(); _dark_titlebar_toplevel(self)
         self.stages=stages; self.index=index; self.img_tk=None
         self.canvas=tk.Canvas(self,bg=C_BG,highlightthickness=0); self.canvas.pack(pady=(10,0))
         bf=tk.Frame(self,bg=C_BG); bf.pack(pady=10)
@@ -698,6 +700,9 @@ class PreviewWindow(tk.Toplevel):
         self.bind("<Escape>",lambda e:self.destroy())
         self.bind("s",       lambda e:self.save_current_png())
         self.focus_set(); self.show_stage()
+        def _fix_titlebar():
+            _dark_titlebar_toplevel(self); self.withdraw(); self.deiconify()
+        self.after(10, _fix_titlebar)
 
     def _load_display_image(self):
         img=make_overlay(self.stages[self.index],font_path=FONT_PATH)
@@ -739,7 +744,6 @@ class SettingsWindow(tk.Toplevel):
         super().__init__(master)
         self.title("Settings"); self.configure(bg="#111111")
         self.resizable(False,False); self.transient(master)
-        self.update_idletasks(); _dark_titlebar_toplevel(self)
         self.grab_set(); self.after(50,self.focus_set)
         self._vars={}; self._show_pw={}; self._color_values={}; self._color_swatches={}
         LABEL_W=18; ENTRY_W=46; pad_x,pad_y=16,5
@@ -802,6 +806,9 @@ class SettingsWindow(tk.Toplevel):
         mx=master.winfo_x()+master.winfo_width()//2; my=master.winfo_y()+master.winfo_height()//2
         w,h=self.winfo_width(),self.winfo_height()
         self.geometry(f"+{mx-w//2}+{my-h//2}")
+        def _fix_titlebar():
+            _dark_titlebar_toplevel(self); self.withdraw(); self.deiconify()
+        self.after(10, _fix_titlebar)
 
     def _pick_color(self, k):
         res=colorchooser.askcolor(color=_rgb_to_hex(self._color_values[k]),title=f"Choose color — {k}",parent=self)
