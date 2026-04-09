@@ -1,19 +1,17 @@
 Hi there fellow competition shooter!
 
 ## Lastest updates
-Just completed version 2.5 of the software. Some new functionality was added and here's the changelog:
+New version 3.0! This is a major rewrite of the GUI so it's a more appealing for the user. No new functionality was added, the updates are to a very large extent under the hood. The output is identical to version 2.x. If you have any suggestions, please send them to me! :)
 
-### New features:
-* Add the option to edit the application config from within the application. If no config.json is present, create one using some defaults and prompts for login details for SSI
-* Make colors customizable
-* Add button to reset to defaults.
+### Major changes:
+* UI rewrite. More modern looking UI.
+* Most changes made in Settings will does not require restart to become active.
+* Added colors on cells in the scrape results to match the overlay output.
+* Added scrapring status to toolbar.
+* Added Last scrape time to toolbar.
+* Scrape URL (Match URL) bar with labelled input field.
+Read the complete release change log for more changes, fixes and details!
 
-#### Improvements:
-* Right after scraping, if no stage is selected when clicking "Preview Overlay" an error was displayed saying "Select a stage first". Now it previews the first/top stage automatically.
-* When editing a cell, you previously had to select the previous value, now it selects it so you can change or edit it right away.
-
-#### Minor whoopsies:
-* Accidentally called this release 3.0 on in some commits. No, 3.0 will not be released yet. 3.0 will be a GUI-update or rewrite, no other new features or fixes planned as of yet tho ;)
 
 ## What the hell is this?
 
@@ -22,8 +20,8 @@ No more, no less.
 
 
 ## Screenshots
-Main window (updated for version 2.5!)
-![Application main windows screenshot](./app_demo25.png)
+Main window (updated for version 3.0!)
+![Application main windows screenshot](./app_demo30.png)
 
 Generated overlay for a sample stage
 ![Application main windows screenshot](./7_Stage_7.png)
@@ -56,7 +54,7 @@ Feel free to manually edit your config.json file but not sure why you'd want to.
 ## Support? Issues?
 I have no coding experience what so ever. I just fired up an AI-tool and described to it what I wanted. If the application stops working or features are missing ... well, don't expect too much is what I'm saying. I'm not actively supporting or updating the application at all. I will however update it and add new functionality when I feel like it. Feel free to leave a suggestion [here](https://github.com/TheBamse/SSI-Scoring-Overlay-Software/issues). Make sure to use the tag  $\color{Green}{\textsf{"suggestion"}}$.<br/><br/>
 This repo holds the most current version of the source code for the application if you want to check it out or do something like this on your own. Feel free to copy, do modifications or whatever you like. I would appreciate some kind of feedback if you do modify or share this someftware with someone else though.<br/>
-I'm mostly publishing the source code to prove I'm not I'm not collecting your SSI login information or anything like that.<br/><br/>
+I'm mostly publishing the source code to prove I'm not I'm not collecting your SSI login information or anything shady like that.<br/><br/>
 If you have any suggested improvements you've made to your own fork or local copy, please make a pull request and lets make the application better together! <3
 
 ## Security considerations - PLEASE READ
