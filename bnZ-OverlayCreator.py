@@ -1,17 +1,65 @@
 #!/usr/bin/env python3
 """
-bnZ-OverlayCreator.py  —  v3.1
+bnZ-OverlayCreator.py  —  v3.0  (development build)
 
-All v3.0 visual and functional changes retained.
+UI revamp — Direction C (Windows dark theme):
 
-Improvements in v3.1:
-  - Credentials read from CONFIG at scrape time, not stale startup constants.
-    Changing username/password in Settings now takes effect immediately.
-  - scrape_scores() removed — dead code never called by the GUI.
-  - Export Overlays runs in a background thread; progress shown in status bar.
-  - Window geometry clamped to screen bounds on load.
-  - scrape_scores_debug_from_csv resolves debug_rows.csv via app_dir().
-  - Silent bare excepts in normalize_stage now log field name and error.
+Architecture:
+  The ttk.Treeview is replaced entirely by CanvasTable, a custom widget
+  that draws all headers, rows, colours, and the selection accent bar
+  directly onto a tk.Canvas. This gives full per-cell colour control
+  without any platform-specific hacks.
+
+Visual changes vs v2.5:
+  - Compact header bar: logo pill, app title, all buttons right-aligned
+  - Scrape button is primary (blue); all others are ghost style
+  - URL bar sits below the header as its own row
+  - Hit columns (A/C/D/M/P/NS) rendered in their configured overlay colours
+  - HF column rendered in blue as the primary performance number
+  - Zero hit values dimmed to reduce visual noise
+  - Selected row: dark blue background + 3px blue left-border accent
+  - Hovered row: slightly lighter background + dim blue accent
+  - Status bar: connection indicator (grey/green dot) + last scraped time
+  - Cell editor: dark background, blue focus ring, pre-selects value
+  - All dialogs (info, warning, error) use a custom dark-themed Toplevel
+    instead of the system messagebox, keeping the dark aesthetic throughout
+
+Functional changes vs v2.5:
+  - Credentials read from CONFIG at scrape time, not stale startup constants;
+    username/password changes in Settings take effect on the next scrape
+    without requiring a restart
+  - scrape_scores() removed — dead code that was never called by the GUI
+  - Export Overlays runs in a background thread; progress shown in status bar
+  - Window geometry clamped to screen bounds on load, preventing an
+    off-screen window after a monitor is disconnected
+  - scrape_scores_debug_from_csv resolves debug_rows.csv via app_dir(),
+    working correctly in both script and PyInstaller exe contexts
+  - Silent bare excepts in normalize_stage now log the field name and error
+
+Known platform notes:
+  - Dark title bar: works reliably on Windows 11. On Windows 10 a
+    withdraw/deiconify cycle is required after the DWM attribute call to
+    force the non-client area to repaint immediately.
+  - Rounded corners: Windows 11 only via DWM attribute 33. Not supported
+    on Windows 10 regardless of build version. Deferred to v4.0.
+  - Resize: status bar must be packed before the table (side="bottom"
+    widgets must precede expand=True widgets in tkinter's pack manager).
+
+Bug fixes:
+  - CanvasTable: custom Canvas scrollbar replaces tk.Scrollbar
+    (native scrollbar ignores colour options on Windows)
+  - Scrollbar hidden when content fits; shown and redrawn via <Configure>
+    binding so it never flashes the wrong colour on first render
+  - SettingsWindow: dark title bar via DwmSetWindowAttribute
+  - SettingsWindow: after(50, focus_set) so Escape works immediately
+    (grab_set() steals focus before the window is fully mapped)
+  - PreviewWindow: dark title bar via DwmSetWindowAttribute
+  - Cell editor: _commit_edit() called on any canvas click so clicking
+    outside a cell saves the value (FocusOut alone is unreliable on Canvas)
+  - Cell editor: _saved flag prevents double-fire when redraw() destroys
+    the entry and triggers a second FocusOut
+  - DWM titlebar calls consolidated into shared helpers (_apply_dark_titlebar_hwnd,
+    _dark_titlebar_toplevel) with Win10 attr-19 fallback after Win11 attr-20
 """
 
 from pathlib import Path
@@ -94,6 +142,55 @@ def get_overlay_colors():
     return result
 
 def _rgb_to_hex(rgb): return "#{:02x}{:02x}{:02x}".format(rgb[0], rgb[1], rgb[2])
+
+def _apply_dark_titlebar_hwnd(hwnd):
+    """Try Win11 attr 20, fall back to Win10 attr 19."""
+    try:
+        import ctypes
+        val = ctypes.byref(ctypes.c_int(1))
+        sz  = ctypes.sizeof(ctypes.c_int(1))
+        if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, val, sz) != 0:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, val, sz)
+    except Exception:
+        pass
+
+def _dark_titlebar_toplevel(win):
+    """Call after update_idletasks() on any Toplevel or Tk window."""
+    try:
+        import ctypes
+        hwnd = ctypes.windll.user32.FindWindowW(None, win.title())
+        if hwnd:
+            _apply_dark_titlebar_hwnd(hwnd)
+    except Exception:
+        pass
+
+def dark_dialog(parent, title, message, kind="info"):
+    """A dark-themed replacement for messagebox.showinfo / showerror / showwarning."""
+    dlg = tk.Toplevel(parent)
+    dlg.title(title)
+    dlg.configure(bg="#111111")
+    dlg.resizable(False, False)
+    dlg.transient(parent)
+    dlg.grab_set()
+    dlg.update_idletasks(); _dark_titlebar_toplevel(dlg)
+    icon_map = {"info": ("ℹ", C_ACCENT), "error": ("✕", "#ef4444"), "warning": ("⚠", "#f59e0b")}
+    icon_txt, icon_col = icon_map.get(kind, ("ℹ", C_ACCENT))
+    top = tk.Frame(dlg, bg="#111111"); top.pack(padx=20, pady=(18, 8), fill="x")
+    tk.Label(top, text=icon_txt, bg="#111111", fg=icon_col,
+        font=("Segoe UI", 16, "bold")).pack(side="left", anchor="n", padx=(0, 12))
+    tk.Label(top, text=message, bg="#111111", fg=C_TEXT,
+        font=("Segoe UI", 9), justify="left", wraplength=360, anchor="w").pack(side="left", fill="x", expand=True)
+    bf = tk.Frame(dlg, bg="#111111"); bf.pack(pady=(4, 16))
+    tk.Button(bf, text="OK", width=10, command=dlg.destroy, **BTN_PRIMARY).pack()
+    dlg.bind("<Return>", lambda e: dlg.destroy())
+    dlg.bind("<Escape>", lambda e: dlg.destroy())
+    dlg.update_idletasks()
+    px = parent.winfo_x() + parent.winfo_width() // 2
+    py = parent.winfo_y() + parent.winfo_height() // 2
+    w, h = dlg.winfo_width(), dlg.winfo_height()
+    dlg.geometry(f"+{px - w // 2}+{py - h // 2}")
+    dlg.focus_set()
+    parent.wait_window(dlg)
 
 # ------------------------
 # SCRAPER
@@ -387,21 +484,29 @@ class ScoringApp(tk.Tk):
             geom = "1200x680"
         self.geometry(geom)
 
-        # Dark title bar (Win11 reliable; Win10 best-effort)
-        try:
-            import ctypes
-            self.update_idletasks()
-            hwnd = ctypes.windll.user32.FindWindowW(None, self.title())
-            if hwnd:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20,
-                    ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int(1)))
-        except Exception:
-            pass
+        # Dark title bar deferred — see _apply_dark_titlebar called via after(100) below.
 
         self.session = None; self.stages = []
         if _first_run: self.after(200, self._show_first_run_welcome)
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.after(100, self._apply_dark_titlebar)
+
+    def _apply_dark_titlebar(self):
+        self.update_idletasks()
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.FindWindowW(None, self.title())
+            if hwnd:
+                val = ctypes.byref(ctypes.c_int(1))
+                sz  = ctypes.sizeof(ctypes.c_int(1))
+                if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, val, sz) != 0:
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, val, sz)
+                # Force Win10 to repaint the non-client area immediately
+                self.withdraw()
+                self.deiconify()
+        except Exception:
+            pass
 
     def _build_ui(self):
         hdr = tk.Frame(self, bg=C_SURFACE, height=38)
@@ -461,7 +566,7 @@ class ScoringApp(tk.Tk):
                         child.configure(state=state)
 
     def _show_first_run_welcome(self):
-        messagebox.showinfo("Welcome to SSI Scoring Overlay",
+        dark_dialog(self, "Welcome to SSI Scoring Overlay",
             "A default config.json has been created next to the application.\n\n"
             "Please open \u2699 Settings to enter your Shoot'n Score It username "
             "and password before scraping.")
@@ -492,11 +597,12 @@ class ScoringApp(tk.Tk):
 
     def on_scrape(self):
         url = self.match_var.get().strip()
-        if not url: messagebox.showerror("Error","Enter a match URL first."); return
+        if not url: dark_dialog(self, "Error", "Enter a match URL first.", kind="error"); return
         if not CONFIG.get("ssi_username") or not CONFIG.get("ssi_password"):
-            messagebox.showerror("Credentials missing",
-                "No username or password set.\n\nPlease open \u2699 Settings and enter "
-                "your Shoot'n Score It credentials before scraping."); return
+            dark_dialog(self, "Credentials missing",
+                "No username or password set.\n\n"
+                "Please open \u2699 Settings and enter your Shoot'n Score It credentials before scraping.",
+                kind="error"); return
         self._set_scrape_btn(False); self._set_status_connected(False)
         def _run():
             try:
@@ -507,38 +613,45 @@ class ScoringApp(tk.Tk):
                     stages=scrape_scores_live(self.session,url)
                 stages=[normalize_stage(s) for s in stages]
                 if not stages:
-                    self.after(0,lambda:(messagebox.showerror("No data","No valid stages found at that URL."),self._set_scrape_btn(True))); return
+                    self.after(0,lambda:(dark_dialog(self,"No data","No valid stages found at that URL.",kind="error"),self._set_scrape_btn(True))); return
                 def _done():
                     self.stages=stages; self._refresh_table(); self._set_status_connected(True)
                     self._set_status_time(); CONFIG["last_match_url"]=url; save_config(); self._set_scrape_btn(True)
                     if DEBUG_MODE:
                         src="debug_rows.csv" if dbf.exists() else "online"
-                        messagebox.showinfo("Success",f"DEBUG_MODE ON — {len(stages)} stages from {src}.")
+                        dark_dialog(self,"Success",f"DEBUG_MODE ON — {len(stages)} stages from {src}.")
                 self.after(0,_done)
             except Exception as e:
                 import traceback; traceback.print_exc(); logger.error("Scraping failed: %s",e,exc_info=True)
                 err_str=str(e)
-                title,msg=("Login failed","Could not log in to Shoot'n Score It.\n\nPlease check your username and password in \u2699 Settings and try again.") if "login" in err_str.lower() or "credential" in err_str.lower() else ("Scraping failed",f"Something went wrong while fetching scores.\n\nCheck the URL and your internet connection.\n\nDetail: {err_str}")
-                self.after(0,lambda t=title,m=msg:(messagebox.showerror(t,m),self._set_scrape_btn(True)))
+                title,msg=("Login failed",
+                    "Could not log in to Shoot'n Score It.\n\n"
+                    "Please check your username and password in \u2699 Settings and try again."
+                ) if "login" in err_str.lower() or "credential" in err_str.lower() else (
+                    "Scraping failed",
+                    f"Something went wrong while fetching scores.\n\n"
+                    f"Check the URL and your internet connection.\n\nDetail: {err_str}"
+                )
+                self.after(0,lambda t=title,m=msg:(dark_dialog(self,t,m,kind="error"),self._set_scrape_btn(True)))
         threading.Thread(target=_run,daemon=True).start()
 
     def on_preview(self):
-        if not self.stages: messagebox.showwarning("No data","Scrape first."); return
+        if not self.stages: dark_dialog(self, "No data", "Scrape first.", kind="warning"); return
         idx=self.table.get_selected_index(); PreviewWindow(self,self.stages,idx if idx is not None else 0)
 
     def on_export_csv(self):
-        if not self.stages: messagebox.showwarning("No data","Scrape first."); return
+        if not self.stages: dark_dialog(self, "No data", "Scrape first.", kind="warning"); return
         path=filedialog.asksaveasfilename(defaultextension=".csv",filetypes=[("CSV","*.csv")])
         if not path: return
         cols=("Stage","Time","HF","Rounds","A","C","D","M","NS","P")
         with open(path,"w",newline="",encoding="utf-8") as f:
             w=csv.DictWriter(f,fieldnames=cols); w.writeheader()
             for s in self.stages: w.writerow({c:s.get(c,"") for c in cols})
-        messagebox.showinfo("Saved",f"CSV saved to {path}")
+        dark_dialog(self, "Saved", f"CSV saved to {path}")
 
     def on_export_overlays(self):
         """Export overlays in a background thread with status bar progress."""
-        if not self.stages: messagebox.showwarning("No data","Scrape first."); return
+        if not self.stages: dark_dialog(self, "No data", "Scrape first.", kind="warning"); return
         outdir=OUTPUT_DIR; outdir.mkdir(parents=True,exist_ok=True)
         stages=list(self.stages); total=len(stages)
         self._set_scrape_btn(False); self._set_btn_state("Export Overlays",False)
@@ -551,11 +664,11 @@ class ScoringApp(tk.Tk):
                 def _done():
                     self._set_status_connected(bool(self.stages))
                     self._set_scrape_btn(True); self._set_btn_state("Export Overlays",True)
-                    messagebox.showinfo("Export complete",f"{total} overlay(s) saved to {outdir}")
+                    dark_dialog(self, "Export complete", f"{total} overlay(s) saved to {outdir}")
                 self.after(0,_done)
             except Exception as e:
                 logger.error("Export overlays failed: %s",e,exc_info=True)
-                self.after(0,lambda m=str(e):(self._set_scrape_btn(True),self._set_btn_state("Export Overlays",True),messagebox.showerror("Export failed",f"Export failed:\n{m}")))
+                self.after(0,lambda m=str(e):(self._set_scrape_btn(True),self._set_btn_state("Export Overlays",True),dark_dialog(self,"Export failed",f"Export failed:\n{m}",kind="error")))
         threading.Thread(target=_run,daemon=True).start()
 
     def on_settings(self): SettingsWindow(self)
@@ -572,11 +685,7 @@ class PreviewWindow(tk.Toplevel):
     def __init__(self, master, stages, index):
         super().__init__(master)
         self.title("Overlay Preview"); self.configure(bg=C_BG)
-        try:
-            import ctypes; self.update_idletasks()
-            hwnd=ctypes.windll.user32.FindWindowW(None,self.title())
-            if hwnd: ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd,20,ctypes.byref(ctypes.c_int(1)),ctypes.sizeof(ctypes.c_int(1)))
-        except: pass
+        self.update_idletasks(); _dark_titlebar_toplevel(self)
         self.stages=stages; self.index=index; self.img_tk=None
         self.canvas=tk.Canvas(self,bg=C_BG,highlightthickness=0); self.canvas.pack(pady=(10,0))
         bf=tk.Frame(self,bg=C_BG); bf.pack(pady=10)
@@ -608,7 +717,8 @@ class PreviewWindow(tk.Toplevel):
         name=s.get("Stage",f"stage_{self.index}").replace(" ","_").replace(".","")
         path=filedialog.asksaveasfilename(defaultextension=".png",initialfile=f"{name}.png",filetypes=[("PNG files","*.png")])
         if not path: return
-        make_overlay(s,font_path=FONT_PATH,outpath=path); messagebox.showinfo("Saved",f"Overlay saved to {path}")
+        make_overlay(s,font_path=FONT_PATH,outpath=path)
+        dark_dialog(self, "Saved", f"Overlay saved to {path}")
 
     def prev_stage(self):
         if self.index>0: self.index-=1; self.show_stage()
@@ -629,11 +739,7 @@ class SettingsWindow(tk.Toplevel):
         super().__init__(master)
         self.title("Settings"); self.configure(bg="#111111")
         self.resizable(False,False); self.transient(master)
-        try:
-            import ctypes; self.update_idletasks()
-            hwnd=ctypes.windll.user32.FindWindowW(None,self.title())
-            if hwnd: ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd,20,ctypes.byref(ctypes.c_int(1)),ctypes.sizeof(ctypes.c_int(1)))
-        except: pass
+        self.update_idletasks(); _dark_titlebar_toplevel(self)
         self.grab_set(); self.after(50,self.focus_set)
         self._vars={}; self._show_pw={}; self._color_values={}; self._color_swatches={}
         LABEL_W=18; ENTRY_W=46; pad_x,pad_y=16,5
@@ -722,11 +828,11 @@ class SettingsWindow(tk.Toplevel):
         for key,var in self._vars.items():
             val=var.get(); CONFIG[key]=bool(val) if isinstance(var,tk.BooleanVar) else str(val).strip()
         CONFIG["colors"]={k:v for k,v in self._color_values.items()}; save_config()
-        messagebox.showinfo("Settings saved",
-            "Settings have been saved to config.json.\n\n"
-            "Credential changes take effect immediately on the next scrape.\n"
-            "Font path and output directory changes take effect on next restart.\n\n"
-            "Color changes take effect immediately.",parent=self)
+        dark_dialog(self, "Settings saved",
+            "All changes have been saved.\n\n"
+            "Credentials and color changes take effect immediately on the next scrape or export.\n\n"
+            "Font path and output directory changes require a restart to take effect.",
+            kind="info")
         self.destroy()
 
 
