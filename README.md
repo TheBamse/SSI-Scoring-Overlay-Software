@@ -3,12 +3,14 @@ Hi there fellow competition shooter!
 ## Lastest updates
 New version 3.0! This is a major rewrite of the GUI so it's a more appealing for the user. No new functionality was added, the updates are to a very large extent under the hood. The output is identical to version 2.x. If you have any suggestions, please send them to me! :)
 
-### Changes:
+### Major changes:
 * UI rewrite. More modern looking UI.
+* Most changes made in Settings will does not require restart to become active.
 * Added colors on cells in the scrape results to match the overlay output.
 * Added scrapring status to toolbar.
 * Added Last scrape time to toolbar.
 * Scrape URL (Match URL) bar with labelled input field.
+Read the complete release change log for more changes, fixes and details!
 
 
 ## What the hell is this?
@@ -18,8 +20,8 @@ No more, no less.
 
 
 ## Screenshots
-Main window (updated for version 2.5!)
-![Application main windows screenshot](./app_demo25.png)
+Main window (updated for version 3.0!)
+![Application main windows screenshot](./app_demo30.png)
 
 Generated overlay for a sample stage
 ![Application main windows screenshot](./7_Stage_7.png)
