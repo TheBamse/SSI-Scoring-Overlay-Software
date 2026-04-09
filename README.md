@@ -10,7 +10,8 @@ New version 3.0! This is a major rewrite of the GUI so it's a more appealing for
 * Added scrapring status to toolbar.
 * Added Last scrape time to toolbar.
 * Scrape URL (Match URL) bar with labelled input field.
-<br/>Read the complete release change log for more changes, fixes and details!
+
+Read the complete release change log for more changes, fixes and details!
 
 
 ## What the hell is this?
