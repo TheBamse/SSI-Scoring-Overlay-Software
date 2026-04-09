@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-bnZ-OverlayCreator.py  —  v3.0  (development build)
-
-UI revamp — Direction C (Windows dark theme):
+bnZ-OverlayCreator.py  —  v3.0
 
 Architecture:
   The ttk.Treeview is replaced entirely by CanvasTable, a custom widget
