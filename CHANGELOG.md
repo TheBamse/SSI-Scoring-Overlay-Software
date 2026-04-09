@@ -1,27 +1,25 @@
-# Changelog
-## v3.0
+## Changelog for version 3.0:
 
-### New
-- Completely redesigned UI — dark theme throughout with a modern flat aesthetic
-- Custom canvas-based table replaces the system treeview, enabling per-cell colour rendering
-- Hit columns (A, C, D, M, P, NS) now display in their configured overlay colours directly in the table
-- HF (hit factor) column highlighted in blue as the primary performance number
-- Zero hit values are dimmed to reduce visual noise — only non-zero hits stand out
-- Selected row shows a blue left-border accent and dark blue background
-- Hovered row highlights with a lighter background and a dim blue accent
-- Status bar at the bottom shows connection state (grey/green dot) and last scraped time
-- Vertical and horizontal scrollbars appear automatically when content exceeds the visible area, and disappear when not needed — both are dark-themed to match the UI
-- Window is freely resizable in both directions with no enforced minimum size
-- Preview Overlay window now has a Close button between Next and Save PNG
-- Preview Overlay and Settings windows match the dark theme of the main window
+### New features:
+* Complete UI rewrite using a custom dark Windows theme. The stage table is now a fully custom-drawn canvas widget with per-cell colour support, hover and selection states, and a blue left-border accent on the selected row.
+* Hit columns (A/C/D/M/P/NS) are now rendered in their configured overlay colours directly in the table, and the HF column is highlighted in blue as the primary performance metric. Zero values are dimmed to reduce visual noise.
+* All application dialogs (errors, warnings, confirmations) now use a custom dark-themed dialog consistent with the rest of the UI, replacing the default Windows system dialogs.
+* Export Overlays now runs in a background thread with live progress shown in the status bar, keeping the UI responsive during export.
+* A status bar has been added at the bottom of the main window showing a connection indicator (grey/green dot) and the time of the last successful scrape.
 
-### Changed
-- Buttons are right-aligned in the header bar; order left to right: Scrape → Preview Overlay → Export CSV → Export Overlays → ⚙ Settings
-- Cell editor opens with the existing value pre-selected — type immediately to overwrite
-- Clicking anywhere outside an open cell editor now saves the value (previously required pressing Enter)
-- Double-clicking a new cell while editing another now commits the first edit before opening the second
-- Stage column auto-sizes to the longest stage name after each scrape
-- Preview Overlay defaults to the first stage when none is selected rather than showing an error
+### Improvements:
+* Credentials are now read at scrape time rather than on startup, meaning username and password changes in Settings take effect immediately without restarting the application.
+* Window position is now saved and restored between sessions. If a saved position would place the window off-screen (e.g. after disconnecting a monitor), it is automatically clamped back into view.
+* The debug CSV path now resolves correctly in both script and compiled exe contexts.
+* Errors in stage data normalisation now log the specific field name and error rather than failing silently.
+
+### Bug fixes:
+* Removed a dead `scrape_scores()` function that was never called by the GUI.
+* The custom canvas scrollbar now hides correctly when all content fits on screen, and redraws without flashing the wrong colour on first render.
+* Clicking outside an active cell editor now correctly saves the value. Previously, relying on `FocusOut` alone was unreliable on Canvas widgets.
+* A double-fire bug in the cell editor where `redraw()` could trigger a second `FocusOut` after the entry was already saved has been fixed.
+* Dark title bars now apply correctly on both Windows 10 and Windows 11 across all windows, including dialogs. Windows 10 required a specific repaint cycle that was not previously accounted for.
+* Settings window `Escape` key now works immediately on open. Previously, `grab_set()` stole focus before the window was fully mapped.
 
 ---
 
